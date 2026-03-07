@@ -1,3 +1,9 @@
 [alias]
 fuzzer = "run --package fuzzer --release --"
 helper = "run --package helper --release --"
+
+[env]
+LLVM_CONFIG_PATH = { value = "/usr/bin/llvm-config-18", force = false }
+CC = { value = "clang-18", force = false }
+CXX = { value = "clang++-18", force = false }
+LIBCLANG_PATH = { value = "/usr/lib/llvm-18/lib", force = false }
