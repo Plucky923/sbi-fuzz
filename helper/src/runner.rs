@@ -129,11 +129,10 @@ pub fn run(target: PathBuf, injector: PathBuf, input: PathBuf) {
     qemu.set_breakpoint(breakpoint);
 
     // Process and validate the input
-    let toml_content = fs::read_to_string(&input).expect("read input file");
-    let input = input_from_toml(&toml_content);
+    let input_binary = load_wire_input(&input);
 
     // Write input to emulator memory and execute
-    unsafe { emulator.write_phys_mem(input_addr, &input_to_binary(&input)) }
+    unsafe { emulator.write_phys_mem(input_addr, &input_binary) }
     let mut qemu_ret = match unsafe { emulator.qemu().run() } {
         Ok(QemuExitReason::Breakpoint(_)) => ExitKind::Ok,
         Ok(QemuExitReason::Timeout) => ExitKind::Timeout,
@@ -160,7 +159,7 @@ pub fn run(target: PathBuf, injector: PathBuf, input: PathBuf) {
         }
         // Verify return value is a standard SBI error code
         let a0 = cpu.read_reg(Regs::A0).unwrap_or(1);
-        if !(-13..=0).contains(&(a0 as i64)) {
+        if !is_standard_sbi_error_code(a0) {
             println!("Invalid return value: {:#x}, expected SBI error code", a0);
             qemu_ret = ExitKind::Crash;
         }
@@ -183,9 +182,7 @@ const TEMP_INPUT_BINARY: &str = "/tmp/sbifuzz_input.bin";
 /// * `input` - Path to the TOML input file to debug
 pub fn debug(target: PathBuf, injector: PathBuf, input: PathBuf) {
     // Read and convert the TOML input to binary format
-    let toml_content = fs::read_to_string(&input).expect("read input file");
-    let input = input_from_toml(&toml_content);
-    let input_binary = input_to_binary(&input);
+    let input_binary = load_wire_input(&input);
 
     // Write the binary input to a temporary file for GDB to load
     fs::write(TEMP_INPUT_BINARY, &input_binary).expect("write input binary");
@@ -243,4 +240,15 @@ gdb-multiarch -ex "target remote :1234" \
 
     eprintln!("run failed: {}, command: {:?}", err, cmd);
     std::process::exit(1);
+}
+
+fn load_wire_input(input: &PathBuf) -> Vec<u8> {
+    if input.extension().and_then(|ext| ext.to_str()) == Some("toml") {
+        let toml_content = fs::read_to_string(input).expect("read input file");
+        let input = fix_input_args(input_from_toml(&toml_content));
+        let program = normalize_exec_program(exec_program_from_input(&input));
+        return exec_program_to_bytes(&program);
+    }
+
+    fs::read(input).expect("read input file")
 }

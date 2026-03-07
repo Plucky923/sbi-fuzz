@@ -39,7 +39,7 @@ use libafl_targets::{EDGES_MAP_DEFAULT_SIZE, MAX_EDGES_FOUND, edges_map_mut_ptr}
 use rangemap::RangeMap;
 use serde::{Deserialize, Serialize};
 use std::{
-    cmp::{max, min},
+    cmp::max,
     collections::HashMap,
     fs::{self, OpenOptions},
     path::PathBuf,
@@ -193,13 +193,45 @@ pub fn fuzz(
                            input: &BytesInput| {
             // Convert fuzzer input to fixed-size binary
             let target = input.target_bytes();
-            let mut buf = vec![0; INPUT_SIZE];
-            let copy_len = min(target.len(), INPUT_SIZE);
-            buf[..copy_len].copy_from_slice(&(target.as_slice())[0..copy_len]);
+            let raw = target.as_slice();
 
-            // Process and validate the input
-            let input = input_from_binary(&buf);
-            let mut input = fix_input_args(input);
+            let mut input = if raw.starts_with(EXEC_MAGIC) {
+                match exec_program_from_bytes(raw) {
+                    Ok(program) => {
+                        exec_program_primary_input(&program).unwrap_or_else(|| InputData {
+                            metadata: Metadata::from_call(0, 0, "exec-unknown".to_string()),
+                            args: Args {
+                                eid: 0,
+                                fid: 0,
+                                arg0: 0,
+                                arg1: 0,
+                                arg2: 0,
+                                arg3: 0,
+                                arg4: 0,
+                                arg5: 0,
+                            },
+                        })
+                    }
+                    Err(_) => InputData {
+                        metadata: Metadata::from_call(0, 0, "exec-malformed".to_string()),
+                        args: Args {
+                            eid: 0,
+                            fid: 0,
+                            arg0: 0,
+                            arg1: 0,
+                            arg2: 0,
+                            arg3: 0,
+                            arg4: 0,
+                            arg5: 0,
+                        },
+                    },
+                }
+            } else {
+                let mut buf = vec![0; INPUT_SIZE];
+                let copy_len = raw.len().min(INPUT_SIZE);
+                buf[..copy_len].copy_from_slice(&raw[..copy_len]);
+                fix_input_args(input_from_binary(&buf))
+            };
             if check_skip_fn(&input) {
                 // Skip execution if user-defined function says so
                 return ExitKind::Ok;
@@ -225,7 +257,13 @@ pub fn fuzz(
             }
 
             // Write input to emulator memory and execute
-            unsafe { emulator.write_phys_mem(input_addr, &input_to_binary(&input)) }
+            let wire_input = if raw.starts_with(EXEC_MAGIC) {
+                raw.to_vec()
+            } else {
+                let program = normalize_exec_program(exec_program_from_input(&input));
+                exec_program_to_bytes(&program)
+            };
+            unsafe { emulator.write_phys_mem(input_addr, &wire_input) }
             let mut qemu_ret = match unsafe { emulator.qemu().run() } {
                 Ok(QemuExitReason::Breakpoint(_)) => ExitKind::Ok,
                 Ok(QemuExitReason::Timeout) => ExitKind::Timeout,
@@ -248,7 +286,7 @@ pub fn fuzz(
                 }
                 // Verify return value is a standard SBI error code
                 let a0 = cpu.read_reg(Regs::A0).unwrap_or(1);
-                if !(-13..=0).contains(&(a0 as i64)) {
+                if !is_standard_sbi_error_code(a0) {
                     qemu_ret = ExitKind::Crash;
                 }
             }
@@ -262,6 +300,9 @@ pub fn fuzz(
                 input.metadata.source = format!("fuzz-{}-{:?}", hash, qemu_ret);
                 fs::write(&toml_path, input_to_toml(&input))
                     .expect(format!("write toml file: {:?}", &toml_path).as_str());
+                let raw_path = objective_raw_dir.join(format!("{}.exec", hash));
+                fs::write(&raw_path, &wire_input)
+                    .expect(format!("write raw exec file: {:?}", &raw_path).as_str());
                 state
                     .named_metadata_mut::<ObjectiveCountMetadata>("objective_id_count")
                     .expect("get count")
@@ -339,7 +380,7 @@ pub fn fuzz(
                         });
                 }
                 None => {
-                    let mut generator = RandBytesGenerator::new(nonzero!(INPUT_SIZE));
+                    let mut generator = RandBytesGenerator::new(nonzero!(256));
                     state
                         .generate_initial_inputs(
                             &mut fuzzer,
@@ -359,9 +400,10 @@ pub fn fuzz(
         // Set up mutation strategy and start the fuzzing loop
         let mutator = StdScheduledMutator::new(havoc_mutations());
         let mut stages = tuple_list!(StdMutationalStage::new(mutator));
-        fuzzer
-            .fuzz_loop(&mut stages, &mut executor, &mut state, &mut mgr)
-            .expect("fuzz loop");
+        match fuzzer.fuzz_loop(&mut stages, &mut executor, &mut state, &mut mgr) {
+            Ok(()) | Err(Error::ShuttingDown) => Ok(()),
+            Err(err) => Err(err),
+        }?;
         Ok(())
     };
 

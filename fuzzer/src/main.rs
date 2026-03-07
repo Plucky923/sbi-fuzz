@@ -124,7 +124,8 @@ fn prepare_seeds(dir: &PathBuf) {
 
         // Convert TOML to binary format
         let toml_content = fs::read_to_string(entry_path).expect("read toml file");
-        let toml_data = input_from_toml(&toml_content);
+        let toml_data = fix_input_args(input_from_toml(&toml_content));
+        let exec_program = normalize_exec_program(exec_program_from_input(&toml_data));
         let file_name = entry_path
             .file_stem()
             .and_then(|s| s.to_str())
@@ -132,7 +133,7 @@ fn prepare_seeds(dir: &PathBuf) {
         let output_file_path = binary_seed_dir.join(file_name);
         let mut output_file = File::create(&output_file_path).expect("create binary seed file");
         output_file
-            .write_all(&input_to_binary(&toml_data))
+            .write_all(&exec_program_to_bytes(&exec_program))
             .expect("write binary seed file");
     }
 }
