@@ -1,10 +1,20 @@
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 use common::*;
-use std::{fs, path::PathBuf, process::Command};
+use host_harness::{FdtSeedVariant, seed_fdt_blob};
+use std::{
+    fs,
+    path::PathBuf,
+    process::Command,
+    thread,
+    time::{Duration, Instant},
+};
 
 // Import modules that implement different functionalities
+mod coverage;
 mod instrumenter;
+mod minimizer;
 mod runner;
+mod scenario_generator;
 mod seed_generator;
 
 /// Main CLI structure that defines the top-level command interface
@@ -22,16 +32,34 @@ struct Cli {
 enum Commands {
     /// Generate seeds from RISC-V SBI documentation
     GenerateSeed(GenerateSeed),
+    /// Generate host-side layered harness seeds
+    GenerateHostSeeds(GenerateHostSeeds),
+    /// Generate RustSBI-oriented multi-call exec seeds
+    GenerateRustsbiScenarios(GenerateRustsbiScenarios),
     /// Print the current exec call registry
     ListCalls,
     /// Encode a TOML input into syzkaller-style exec bytes
     EncodeExecInput(ParseBinaryInput),
+    /// Print shared-memory coverage buffer information from the injector ELF
+    CoverageInfo(CoverageInfo),
+    /// Execute one input and export shared-memory coverage artifacts
+    CollectCoverage(CollectCoverage),
+    /// Internal worker subcommand used by `collect-coverage --timeout-ms`
+    #[clap(hide = true)]
+    CollectCoverageOnce(CollectCoverage),
     /// Import Linux-style sbi_ecall samples into TOML corpus seeds
     ImportLinuxCorpus(ImportLinuxCorpus),
+    /// Minimize a stable-hang `.exec` into a shorter reproducer
+    MinimizeHang(MinimizeHang),
     /// Run the SBI firmware using the given input
     Run(RunArgs),
+    /// Internal worker subcommand used by `run --timeout-ms`
+    #[clap(hide = true)]
+    RunOnce(RunArgs),
     /// Run the SBI firmware with GDB support using the given input
     Debug(RunArgs),
+    /// Run one host-side layered harness input
+    RunHostHarness(RunHostHarness),
     /// Instrument SBI firmware source code with KASAN (support OpenSBI)
     InstrumentKasan(InstrumentKasan),
     /// Parse the input from a binary file
@@ -45,6 +73,40 @@ struct GenerateSeed {
     output: String,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+enum HostSeedMode {
+    Ecall,
+    PlatformFault,
+    Fdt,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+enum HostTargetCli {
+    Opensbi,
+    Rustsbi,
+}
+
+#[derive(Args)]
+struct GenerateHostSeeds {
+    /// Target backend to generate seeds for
+    #[arg(long, value_enum)]
+    target_kind: HostTargetCli,
+
+    /// Harness seed mode to generate
+    #[arg(long, value_enum)]
+    mode: HostSeedMode,
+
+    /// Output directory for generated `.host` seeds
+    output: PathBuf,
+}
+
+/// Arguments for RustSBI scenario generation
+#[derive(Args)]
+struct GenerateRustsbiScenarios {
+    /// Output directory for generated `.exec` seeds
+    output: PathBuf,
+}
+
 /// Arguments for Linux corpus import
 #[derive(Args)]
 struct ImportLinuxCorpus {
@@ -53,6 +115,13 @@ struct ImportLinuxCorpus {
 
     /// Output directory for generated seed files
     output: PathBuf,
+}
+
+/// Arguments for coverage buffer inspection
+#[derive(Args)]
+struct CoverageInfo {
+    /// Path to the injector ELF
+    injector: PathBuf,
 }
 
 /// Arguments for both Run and Debug commands
@@ -66,6 +135,89 @@ struct RunArgs {
 
     /// Specify the input file.
     input: PathBuf,
+
+    /// Number of emulated harts passed to QEMU `-smp`
+    #[arg(long, default_value_t = 1)]
+    smp: u16,
+
+    /// Optional wall-clock timeout for `helper run`
+    #[arg(long)]
+    timeout_ms: Option<u64>,
+}
+
+#[derive(Args)]
+struct RunHostHarness {
+    /// Host harness input file (`.host` or JSON)
+    input: PathBuf,
+
+    /// Optional JSON summary output path
+    #[arg(long)]
+    json_out: Option<PathBuf>,
+}
+
+/// Arguments for stable-hang minimization
+#[derive(Args)]
+struct MinimizeHang {
+    /// Specify the target program (binary format, e.g. "fw_dynamic.bin")
+    target: PathBuf,
+
+    /// Specify the injector program (elf format)
+    injector: PathBuf,
+
+    /// Specify the input file.
+    input: PathBuf,
+
+    /// Output path for the minimized `.exec`
+    output: PathBuf,
+
+    /// Number of emulated harts passed to QEMU `-smp`
+    #[arg(long, default_value_t = 1)]
+    smp: u16,
+
+    /// Wall-clock timeout per replay attempt
+    #[arg(long, default_value_t = 1000)]
+    timeout_ms: u64,
+
+    /// Number of replay attempts required to keep a candidate
+    #[arg(long, default_value_t = 2)]
+    attempts: u32,
+
+    /// Optional JSON summary output path
+    #[arg(long)]
+    json_out: Option<PathBuf>,
+}
+
+/// Arguments for shared coverage collection
+#[derive(Args)]
+struct CollectCoverage {
+    /// Specify the target program (binary format, e.g. "fw_dynamic.bin")
+    target: PathBuf,
+
+    /// Specify the injector program (elf format)
+    injector: PathBuf,
+
+    /// Specify the input file
+    input: PathBuf,
+
+    /// Number of emulated harts passed to QEMU `-smp`
+    #[arg(long, default_value_t = 1)]
+    smp: u16,
+
+    /// Optional raw shared-memory coverage dump output path
+    #[arg(long)]
+    raw_out: Option<PathBuf>,
+
+    /// Optional JSON summary output path
+    #[arg(long)]
+    json_out: Option<PathBuf>,
+
+    /// Number of symbolized PCs to include in JSON/stdout
+    #[arg(long, default_value_t = 8)]
+    symbolize_limit: usize,
+
+    /// Optional wall-clock timeout for `helper collect-coverage`
+    #[arg(long)]
+    timeout_ms: Option<u64>,
 }
 
 /// Arguments for KASAN instrumentation command
@@ -93,22 +245,65 @@ fn main() {
             // Generate seed inputs based on SBI documentation
             seed_generator::generate(g.output);
         }
+        Commands::GenerateHostSeeds(args) => {
+            generate_host_seeds(args.target_kind, args.mode, args.output);
+        }
+        Commands::GenerateRustsbiScenarios(args) => {
+            scenario_generator::generate_rustsbi_scenarios(args.output);
+        }
         Commands::ListCalls => {
             list_calls();
         }
         Commands::EncodeExecInput(args) => {
             encode_exec_input(args.input);
         }
+        Commands::CoverageInfo(args) => {
+            coverage::print_shared_coverage_info(args.injector);
+        }
+        Commands::CollectCoverage(args) => {
+            collect_coverage_with_optional_timeout(args);
+        }
+        Commands::CollectCoverageOnce(args) => {
+            runner::collect_coverage(
+                args.target,
+                args.injector,
+                args.input,
+                args.smp,
+                args.raw_out,
+                args.json_out,
+                args.symbolize_limit,
+            );
+        }
         Commands::ImportLinuxCorpus(args) => {
             import_linux_corpus(args.source, args.output);
         }
+        Commands::MinimizeHang(args) => {
+            if let Err(err) = minimizer::minimize_hang(
+                args.target,
+                args.injector,
+                args.input,
+                args.output,
+                args.smp,
+                args.timeout_ms,
+                args.attempts,
+                args.json_out,
+            ) {
+                eprintln!("minimize-hang failed: {err}");
+                std::process::exit(1);
+            }
+        }
         Commands::Run(args) => {
-            // Run the target firmware with the specified input
-            runner::run(args.target, args.injector, args.input);
+            run_with_optional_timeout(args);
+        }
+        Commands::RunOnce(args) => {
+            runner::run(args.target, args.injector, args.input, args.smp);
         }
         Commands::Debug(args) => {
             // Run the target firmware with GDB debugging support
-            runner::debug(args.target, args.injector, args.input);
+            runner::debug(args.target, args.injector, args.input, args.smp);
+        }
+        Commands::RunHostHarness(args) => {
+            run_host_harness(args.input, args.json_out);
         }
         Commands::InstrumentKasan(args) => {
             // Instrument the target source code with KASAN
@@ -118,6 +313,109 @@ fn main() {
             // Parse and convert binary input to a more readable format
             parse_binary_input(args.input);
         }
+    }
+}
+
+fn run_with_optional_timeout(args: RunArgs) {
+    let Some(timeout_ms) = args.timeout_ms.filter(|value| *value > 0) else {
+        runner::run(args.target, args.injector, args.input, args.smp);
+        return;
+    };
+
+    let current_exe = std::env::current_exe().expect("resolve current helper executable");
+    let mut child = Command::new(current_exe)
+        .arg("run-once")
+        .arg(&args.target)
+        .arg(&args.injector)
+        .arg(&args.input)
+        .arg("--smp")
+        .arg(args.smp.to_string())
+        .spawn()
+        .expect("spawn timeout-bounded helper child");
+
+    let deadline = Duration::from_millis(timeout_ms);
+    let start = Instant::now();
+    loop {
+        if let Some(status) = child.try_wait().expect("poll timeout-bounded helper child") {
+            if !status.success() {
+                std::process::exit(status.code().unwrap_or(1));
+            }
+            return;
+        }
+        if start.elapsed() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            println!("Run finish. Exit kind: Timeout");
+            return;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
+fn collect_coverage_with_optional_timeout(args: CollectCoverage) {
+    let Some(timeout_ms) = args.timeout_ms.filter(|value| *value > 0) else {
+        runner::collect_coverage(
+            args.target,
+            args.injector,
+            args.input,
+            args.smp,
+            args.raw_out,
+            args.json_out,
+            args.symbolize_limit,
+        );
+        return;
+    };
+
+    let current_exe = std::env::current_exe().expect("resolve current helper executable");
+    let mut child = Command::new(current_exe);
+    child
+        .arg("collect-coverage-once")
+        .arg(&args.target)
+        .arg(&args.injector)
+        .arg(&args.input)
+        .arg("--smp")
+        .arg(args.smp.to_string())
+        .arg("--symbolize-limit")
+        .arg(args.symbolize_limit.to_string());
+
+    if let Some(raw_out) = args.raw_out.as_ref() {
+        child.arg("--raw-out").arg(raw_out);
+    }
+    if let Some(json_out) = args.json_out.as_ref() {
+        child.arg("--json-out").arg(json_out);
+    }
+
+    let mut child = child
+        .spawn()
+        .expect("spawn timeout-bounded helper coverage child");
+
+    let deadline = Duration::from_millis(timeout_ms);
+    let start = Instant::now();
+    loop {
+        if let Some(status) = child
+            .try_wait()
+            .expect("poll timeout-bounded helper coverage child")
+        {
+            if !status.success() {
+                std::process::exit(status.code().unwrap_or(1));
+            }
+            return;
+        }
+        if start.elapsed() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            if let Some(raw_out) = args.raw_out.as_ref() {
+                let _ = fs::remove_file(raw_out);
+            }
+            runner::emit_timeout_coverage_report(
+                &args.target,
+                &args.injector,
+                &args.input,
+                args.json_out,
+            );
+            return;
+        }
+        thread::sleep(Duration::from_millis(10));
     }
 }
 
@@ -211,4 +509,492 @@ fn import_linux_corpus(source: PathBuf, output: PathBuf) {
     if !status.success() {
         std::process::exit(status.code().unwrap_or(1));
     }
+}
+
+fn generate_host_seeds(target_kind: HostTargetCli, mode: HostSeedMode, output: PathBuf) {
+    fs::create_dir_all(&output).expect("create host harness seed output directory");
+    let target_kind = match target_kind {
+        HostTargetCli::Opensbi => HostTargetKind::OpenSbi,
+        HostTargetCli::Rustsbi => HostTargetKind::RustSbi,
+    };
+    let seeds = match (target_kind, mode) {
+        (HostTargetKind::OpenSbi, HostSeedMode::Ecall) => host_opensbi_ecall_seeds(),
+        (HostTargetKind::OpenSbi, HostSeedMode::PlatformFault) => {
+            host_opensbi_platform_fault_seeds()
+        }
+        (HostTargetKind::OpenSbi, HostSeedMode::Fdt) => host_opensbi_fdt_seeds(),
+        (HostTargetKind::RustSbi, HostSeedMode::Ecall) => host_rustsbi_ecall_seeds(),
+        (HostTargetKind::RustSbi, HostSeedMode::PlatformFault) => {
+            host_rustsbi_platform_fault_seeds()
+        }
+        (HostTargetKind::RustSbi, HostSeedMode::Fdt) => host_rustsbi_fdt_seeds(),
+    };
+    let seed_count = seeds.len();
+
+    for (name, input) in seeds {
+        let bin_path = output.join(format!("{name}.host"));
+        let json_path = output.join(format!("{name}.json"));
+        fs::write(&bin_path, host_harness_input_to_bytes(&input))
+            .expect(format!("write host seed binary: {:?}", &bin_path).as_str());
+        fs::write(
+            &json_path,
+            format!(
+                "{}\n",
+                serde_json::to_string_pretty(&input).expect("serialize host seed json")
+            ),
+        )
+        .expect(format!("write host seed json: {:?}", &json_path).as_str());
+    }
+
+    println!(
+        "Generated {} host-harness seeds in {}",
+        seed_count,
+        output.display()
+    );
+}
+
+fn run_host_harness(input_path: PathBuf, json_out: Option<PathBuf>) {
+    let input = load_host_harness_input(&input_path);
+    let report = host_harness::run(&input).expect("run host harness input");
+    let json = serde_json::to_string_pretty(&report).expect("serialize host harness report");
+    if let Some(json_out) = json_out {
+        fs::write(&json_out, format!("{json}\n"))
+            .expect(format!("write host harness json: {:?}", &json_out).as_str());
+    }
+    println!("{json}");
+}
+
+fn load_host_harness_input(path: &PathBuf) -> HostHarnessInput {
+    let raw = fs::read(path).expect("read host harness input");
+    if let Ok(input) = host_harness_input_from_bytes(&raw) {
+        return input;
+    }
+    let json = String::from_utf8(raw).expect("host harness JSON should be UTF-8");
+    serde_json::from_str(&json).expect("parse host harness JSON input")
+}
+
+fn host_opensbi_ecall_seeds() -> Vec<(String, HostHarnessInput)> {
+    vec![
+        (
+            "base-get-spec-version".to_string(),
+            HostHarnessInput {
+                target_kind: HostTargetKind::OpenSbi,
+                mode: HostHarnessMode::Ecall,
+                call: HostCall::new(0x10, 0, [0; 6]),
+                hart_id: 0,
+                hart_state: HostHartState::Started,
+                privilege: HostPrivilegeState::Supervisor,
+                memory_regions: Vec::new(),
+                platform_fault: HostPlatformFaultProfile::none(),
+                fdt_blob: Vec::new(),
+                label: "base-get-spec-version".to_string(),
+            },
+        ),
+        (
+            "base-probe-hsm".to_string(),
+            HostHarnessInput {
+                target_kind: HostTargetKind::OpenSbi,
+                mode: HostHarnessMode::Ecall,
+                call: HostCall::new(0x10, 3, [0x4853_4d, 0, 0, 0, 0, 0]),
+                hart_id: 0,
+                hart_state: HostHartState::Started,
+                privilege: HostPrivilegeState::Supervisor,
+                memory_regions: Vec::new(),
+                platform_fault: HostPlatformFaultProfile::none(),
+                fdt_blob: Vec::new(),
+                label: "base-probe-hsm".to_string(),
+            },
+        ),
+        (
+            "hsm-hart-status".to_string(),
+            HostHarnessInput {
+                target_kind: HostTargetKind::OpenSbi,
+                mode: HostHarnessMode::Ecall,
+                call: HostCall::new(0x4853_4d, 2, [0, 0, 0, 0, 0, 0]),
+                hart_id: 0,
+                hart_state: HostHartState::Started,
+                privilege: HostPrivilegeState::Supervisor,
+                memory_regions: Vec::new(),
+                platform_fault: HostPlatformFaultProfile::none(),
+                fdt_blob: Vec::new(),
+                label: "hsm-hart-status".to_string(),
+            },
+        ),
+        (
+            "timer-set-timer".to_string(),
+            HostHarnessInput {
+                target_kind: HostTargetKind::OpenSbi,
+                mode: HostHarnessMode::Ecall,
+                call: HostCall::new(0x5449_4d45, 0, [0x1234_5678, 0, 0, 0, 0, 0]),
+                hart_id: 0,
+                hart_state: HostHartState::Started,
+                privilege: HostPrivilegeState::Supervisor,
+                memory_regions: Vec::new(),
+                platform_fault: HostPlatformFaultProfile::none(),
+                fdt_blob: Vec::new(),
+                label: "timer-set-timer".to_string(),
+            },
+        ),
+        (
+            "console-write".to_string(),
+            HostHarnessInput {
+                target_kind: HostTargetKind::OpenSbi,
+                mode: HostHarnessMode::Ecall,
+                call: HostCall::new(0x4442_434e, 0, [12, 0x8000_1000, 0, 0, 0, 0]),
+                hart_id: 0,
+                hart_state: HostHartState::Started,
+                privilege: HostPrivilegeState::Supervisor,
+                memory_regions: vec![HostMemoryRegion {
+                    guest_addr: 0x8000_1000,
+                    read: true,
+                    write: true,
+                    execute: false,
+                    bytes: b"hello host!\n".to_vec(),
+                }],
+                platform_fault: HostPlatformFaultProfile::none(),
+                fdt_blob: Vec::new(),
+                label: "console-write".to_string(),
+            },
+        ),
+        (
+            "unknown-extension".to_string(),
+            HostHarnessInput {
+                target_kind: HostTargetKind::OpenSbi,
+                mode: HostHarnessMode::Ecall,
+                call: HostCall::new(0xdead_beef, 0x55, [1, 2, 3, 4, 5, 6]),
+                hart_id: 0,
+                hart_state: HostHartState::Started,
+                privilege: HostPrivilegeState::Supervisor,
+                memory_regions: Vec::new(),
+                platform_fault: HostPlatformFaultProfile::none(),
+                fdt_blob: Vec::new(),
+                label: "unknown-extension".to_string(),
+            },
+        ),
+    ]
+}
+
+fn host_opensbi_platform_fault_seeds() -> Vec<(String, HostHarnessInput)> {
+    vec![
+        (
+            "ipi-raw-error".to_string(),
+            HostHarnessInput {
+                target_kind: HostTargetKind::OpenSbi,
+                mode: HostHarnessMode::PlatformFault,
+                call: HostCall::new(0x735049, 0, [1, 0, 0, 0, 0, 0]),
+                hart_id: 0,
+                hart_state: HostHartState::Started,
+                privilege: HostPrivilegeState::Supervisor,
+                memory_regions: Vec::new(),
+                platform_fault: HostPlatformFaultProfile::raw_error(7),
+                fdt_blob: Vec::new(),
+                label: "ipi-raw-error".to_string(),
+            },
+        ),
+        (
+            "rfence-denied".to_string(),
+            HostHarnessInput {
+                target_kind: HostTargetKind::OpenSbi,
+                mode: HostHarnessMode::PlatformFault,
+                call: HostCall::new(0x5246_4e43, 1, [1, 0, 0, 0x1000, 0, 0]),
+                hart_id: 0,
+                hart_state: HostHartState::Started,
+                privilege: HostPrivilegeState::Supervisor,
+                memory_regions: Vec::new(),
+                platform_fault: HostPlatformFaultProfile::sbi_error(SbiError::Denied),
+                fdt_blob: Vec::new(),
+                label: "rfence-denied".to_string(),
+            },
+        ),
+        (
+            "console-duplicate".to_string(),
+            HostHarnessInput {
+                target_kind: HostTargetKind::OpenSbi,
+                mode: HostHarnessMode::PlatformFault,
+                call: HostCall::new(0x4442_434e, 0, [4, 0x8000_2000, 0, 0, 0, 0]),
+                hart_id: 0,
+                hart_state: HostHartState::Started,
+                privilege: HostPrivilegeState::Supervisor,
+                memory_regions: vec![HostMemoryRegion {
+                    guest_addr: 0x8000_2000,
+                    read: true,
+                    write: true,
+                    execute: false,
+                    bytes: b"ping".to_vec(),
+                }],
+                platform_fault: HostPlatformFaultProfile {
+                    mode: HostPlatformFaultMode::None,
+                    error: 0,
+                    value: 0,
+                    duplicate_side_effects: true,
+                },
+                fdt_blob: Vec::new(),
+                label: "console-duplicate".to_string(),
+            },
+        ),
+        (
+            "hsm-start-timeout".to_string(),
+            HostHarnessInput {
+                target_kind: HostTargetKind::OpenSbi,
+                mode: HostHarnessMode::PlatformFault,
+                call: HostCall::new(0x4853_4d, 0, [1, 0x8020_0000, 0, 0, 0, 0]),
+                hart_id: 0,
+                hart_state: HostHartState::Stopped,
+                privilege: HostPrivilegeState::Supervisor,
+                memory_regions: Vec::new(),
+                platform_fault: HostPlatformFaultProfile::sbi_error(SbiError::Timeout),
+                fdt_blob: Vec::new(),
+                label: "hsm-start-timeout".to_string(),
+            },
+        ),
+    ]
+}
+
+fn host_opensbi_fdt_seeds() -> Vec<(String, HostHarnessInput)> {
+    vec![
+        host_fdt_seed(
+            HostTargetKind::OpenSbi,
+            "fdt-minimal",
+            FdtSeedVariant::Minimal,
+        ),
+        host_fdt_seed(
+            HostTargetKind::OpenSbi,
+            "fdt-missing-cpus",
+            FdtSeedVariant::MissingCpus,
+        ),
+        host_fdt_seed(
+            HostTargetKind::OpenSbi,
+            "fdt-bad-coldboot-phandle",
+            FdtSeedVariant::BadColdbootPhandle,
+        ),
+        host_fdt_seed(
+            HostTargetKind::OpenSbi,
+            "fdt-bad-heap-size",
+            FdtSeedVariant::BadHeapSize,
+        ),
+    ]
+}
+
+fn host_rustsbi_ecall_seeds() -> Vec<(String, HostHarnessInput)> {
+    vec![
+        (
+            "base-get-spec-version".to_string(),
+            HostHarnessInput {
+                target_kind: HostTargetKind::RustSbi,
+                mode: HostHarnessMode::Ecall,
+                call: HostCall::new(0x10, 0, [0; 6]),
+                hart_id: 0,
+                hart_state: HostHartState::Started,
+                privilege: HostPrivilegeState::Supervisor,
+                memory_regions: Vec::new(),
+                platform_fault: HostPlatformFaultProfile::none(),
+                fdt_blob: Vec::new(),
+                label: "base-get-spec-version".to_string(),
+            },
+        ),
+        (
+            "base-probe-ipi".to_string(),
+            HostHarnessInput {
+                target_kind: HostTargetKind::RustSbi,
+                mode: HostHarnessMode::Ecall,
+                call: HostCall::new(0x10, 3, [0x7350_49, 0, 0, 0, 0, 0]),
+                hart_id: 0,
+                hart_state: HostHartState::Started,
+                privilege: HostPrivilegeState::Supervisor,
+                memory_regions: Vec::new(),
+                platform_fault: HostPlatformFaultProfile::none(),
+                fdt_blob: Vec::new(),
+                label: "base-probe-ipi".to_string(),
+            },
+        ),
+        (
+            "hsm-hart-status".to_string(),
+            HostHarnessInput {
+                target_kind: HostTargetKind::RustSbi,
+                mode: HostHarnessMode::Ecall,
+                call: HostCall::new(0x4853_4d, 2, [0, 0, 0, 0, 0, 0]),
+                hart_id: 0,
+                hart_state: HostHartState::Started,
+                privilege: HostPrivilegeState::Supervisor,
+                memory_regions: Vec::new(),
+                platform_fault: HostPlatformFaultProfile::none(),
+                fdt_blob: Vec::new(),
+                label: "hsm-hart-status".to_string(),
+            },
+        ),
+        (
+            "timer-set-timer".to_string(),
+            HostHarnessInput {
+                target_kind: HostTargetKind::RustSbi,
+                mode: HostHarnessMode::Ecall,
+                call: HostCall::new(0x5449_4d45, 0, [0x1234_5678, 0, 0, 0, 0, 0]),
+                hart_id: 0,
+                hart_state: HostHartState::Started,
+                privilege: HostPrivilegeState::Supervisor,
+                memory_regions: Vec::new(),
+                platform_fault: HostPlatformFaultProfile::none(),
+                fdt_blob: Vec::new(),
+                label: "timer-set-timer".to_string(),
+            },
+        ),
+        (
+            "console-write".to_string(),
+            HostHarnessInput {
+                target_kind: HostTargetKind::RustSbi,
+                mode: HostHarnessMode::Ecall,
+                call: HostCall::new(0x4442_434e, 0, [12, 0x8000_1000, 0, 0, 0, 0]),
+                hart_id: 0,
+                hart_state: HostHartState::Started,
+                privilege: HostPrivilegeState::Supervisor,
+                memory_regions: vec![HostMemoryRegion {
+                    guest_addr: 0x8000_1000,
+                    read: true,
+                    write: true,
+                    execute: false,
+                    bytes: b"hello host!\n".to_vec(),
+                }],
+                platform_fault: HostPlatformFaultProfile::none(),
+                fdt_blob: Vec::new(),
+                label: "console-write".to_string(),
+            },
+        ),
+        (
+            "unknown-extension".to_string(),
+            HostHarnessInput {
+                target_kind: HostTargetKind::RustSbi,
+                mode: HostHarnessMode::Ecall,
+                call: HostCall::new(0xdead_beef, 0x55, [1, 2, 3, 4, 5, 6]),
+                hart_id: 0,
+                hart_state: HostHartState::Started,
+                privilege: HostPrivilegeState::Supervisor,
+                memory_regions: Vec::new(),
+                platform_fault: HostPlatformFaultProfile::none(),
+                fdt_blob: Vec::new(),
+                label: "unknown-extension".to_string(),
+            },
+        ),
+    ]
+}
+
+fn host_rustsbi_platform_fault_seeds() -> Vec<(String, HostHarnessInput)> {
+    vec![
+        (
+            "ipi-raw-error".to_string(),
+            HostHarnessInput {
+                target_kind: HostTargetKind::RustSbi,
+                mode: HostHarnessMode::PlatformFault,
+                call: HostCall::new(0x7350_49, 0, [1, 0, 0, 0, 0, 0]),
+                hart_id: 0,
+                hart_state: HostHartState::Started,
+                privilege: HostPrivilegeState::Supervisor,
+                memory_regions: Vec::new(),
+                platform_fault: HostPlatformFaultProfile::raw_error(7),
+                fdt_blob: Vec::new(),
+                label: "ipi-raw-error".to_string(),
+            },
+        ),
+        (
+            "rfence-denied".to_string(),
+            HostHarnessInput {
+                target_kind: HostTargetKind::RustSbi,
+                mode: HostHarnessMode::PlatformFault,
+                call: HostCall::new(0x5246_4e43, 1, [1, 0, 0, 0x1000, 0, 0]),
+                hart_id: 0,
+                hart_state: HostHartState::Started,
+                privilege: HostPrivilegeState::Supervisor,
+                memory_regions: Vec::new(),
+                platform_fault: HostPlatformFaultProfile::sbi_error(SbiError::Denied),
+                fdt_blob: Vec::new(),
+                label: "rfence-denied".to_string(),
+            },
+        ),
+        (
+            "console-duplicate".to_string(),
+            HostHarnessInput {
+                target_kind: HostTargetKind::RustSbi,
+                mode: HostHarnessMode::PlatformFault,
+                call: HostCall::new(0x4442_434e, 0, [4, 0x8000_2000, 0, 0, 0, 0]),
+                hart_id: 0,
+                hart_state: HostHartState::Started,
+                privilege: HostPrivilegeState::Supervisor,
+                memory_regions: vec![HostMemoryRegion {
+                    guest_addr: 0x8000_2000,
+                    read: true,
+                    write: true,
+                    execute: false,
+                    bytes: b"ping".to_vec(),
+                }],
+                platform_fault: HostPlatformFaultProfile {
+                    mode: HostPlatformFaultMode::None,
+                    error: 0,
+                    value: 0,
+                    duplicate_side_effects: true,
+                },
+                fdt_blob: Vec::new(),
+                label: "console-duplicate".to_string(),
+            },
+        ),
+        (
+            "hsm-start-timeout".to_string(),
+            HostHarnessInput {
+                target_kind: HostTargetKind::RustSbi,
+                mode: HostHarnessMode::PlatformFault,
+                call: HostCall::new(0x4853_4d, 0, [1, 0x8020_0000, 0, 0, 0, 0]),
+                hart_id: 0,
+                hart_state: HostHartState::Stopped,
+                privilege: HostPrivilegeState::Supervisor,
+                memory_regions: Vec::new(),
+                platform_fault: HostPlatformFaultProfile::sbi_error(SbiError::Timeout),
+                fdt_blob: Vec::new(),
+                label: "hsm-start-timeout".to_string(),
+            },
+        ),
+    ]
+}
+
+fn host_rustsbi_fdt_seeds() -> Vec<(String, HostHarnessInput)> {
+    vec![
+        host_fdt_seed(
+            HostTargetKind::RustSbi,
+            "fdt-minimal",
+            FdtSeedVariant::Minimal,
+        ),
+        host_fdt_seed(
+            HostTargetKind::RustSbi,
+            "fdt-missing-cpus",
+            FdtSeedVariant::MissingCpus,
+        ),
+        host_fdt_seed(
+            HostTargetKind::RustSbi,
+            "fdt-bad-stdout-path",
+            FdtSeedVariant::BadStdoutPath,
+        ),
+        host_fdt_seed(
+            HostTargetKind::RustSbi,
+            "fdt-bad-console-compatible",
+            FdtSeedVariant::BadConsoleCompatible,
+        ),
+    ]
+}
+
+fn host_fdt_seed(
+    target_kind: HostTargetKind,
+    name: &str,
+    variant: FdtSeedVariant,
+) -> (String, HostHarnessInput) {
+    (
+        name.to_string(),
+        HostHarnessInput {
+            target_kind,
+            mode: HostHarnessMode::Fdt,
+            call: HostCall::new(0, 0, [0; 6]),
+            hart_id: 0,
+            hart_state: HostHartState::Started,
+            privilege: HostPrivilegeState::Supervisor,
+            memory_regions: Vec::new(),
+            platform_fault: HostPlatformFaultProfile::none(),
+            fdt_blob: seed_fdt_blob(target_kind, variant).expect("build host FDT seed"),
+            label: name.to_string(),
+        },
+    )
 }
