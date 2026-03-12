@@ -1,7 +1,7 @@
 CC = riscv64-unknown-elf-gcc
 LD = riscv64-unknown-elf-ld
 
-CFLAGS = -march=rv64imac -mabi=lp64 -mcmodel=medany -Isrc
+CFLAGS = -march=rv64imac_zicsr -mabi=lp64 -mcmodel=medany -Isrc
 LDFLAGS = -T src/linker.ld --no-warn-rwx-segments
 
 BUILD_DIR = build

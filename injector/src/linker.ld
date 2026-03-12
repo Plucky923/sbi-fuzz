@@ -3,36 +3,40 @@ ENTRY(_start)
 
 MEMORY
 {
-    RAM (xrw)  : ORIGIN = 0x80200000, LENGTH = 4M
+    RAM   (xrw) : ORIGIN = 0x80600000, LENGTH = 0x003FC000
+    SHMEM (rw)  : ORIGIN = 0x809FC000, LENGTH = 0x00003000
+    STACK (rw)  : ORIGIN = 0x809FF000, LENGTH = 0x00001000
 }
 
 /* Define memory layout */
 SECTIONS
 {
-    /* Text section (code section) */
     .text : {
-        *(.text)         /* Place all .text sections here */
-        *(.text.*)       /* Match all sections starting with .text */
-    } > RAM 
+        *(.text)
+        *(.text.*)
+    } > RAM
 
-    /* Data section (initialized global variables) */
     .data : {
-        *(.data)         /* Place all .data sections here */
-        *(.data.*)       /* Match all sections starting with .data */
-    } > RAM 
+        *(.data)
+        *(.data.*)
+    } > RAM
 
-    /* BSS section (uninitialized global variables) */
     .bss : {
-        *(.bss)          /* Place all .bss sections here */
-        *(.bss.*)        /* Match all sections starting with .bss */
-        *(COMMON)        /* Place all COMMON blocks here */
-    } > RAM 
+        *(.bss)
+        *(.bss.*)
+        *(COMMON)
+    } > RAM
 
-    /* Stack definition */
-    . = ALIGN(4);         /* Align to 4 bytes */
-    _stack_start = .;      /* Stack start address */
+    .sbifuzz_shmem (NOLOAD) : ALIGN(8) {
+        KEEP(*(.sbifuzz_shmem))
+    } > SHMEM
+
     .stack (NOLOAD) : {
-        . = . + 0x1000;   /* Allocate 4KB for stack space (adjust size as needed) */
-    } > RAM 
-    _stack_end = .;        /* Stack end address */
+        . = ALIGN(16);
+        _stack_start = .;
+        . = . + 0x1000;
+        _stack_end = .;
+    } > STACK
 }
+
+ASSERT(SIZEOF(.sbifuzz_shmem) <= LENGTH(SHMEM), "sbifuzz shared-memory buffer overflow")

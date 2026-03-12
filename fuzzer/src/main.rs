@@ -3,7 +3,8 @@ use common::*;
 use libafl::Error;
 use std::fs::{self, File};
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
+use std::process;
 use std::str::FromStr;
 use std::time::Duration;
 use walkdir::WalkDir;
@@ -42,6 +43,10 @@ struct Cli {
     /// Timeout for each execution in milliseconds
     #[clap(long, default_value = "100")]
     timeout: u64,
+
+    /// Number of emulated harts passed to QEMU `-smp`
+    #[clap(long, default_value = "1")]
+    smp: u16,
 
     /// Specify custom inputs to skip (eg. "1:2,3" inputs with eid=1, fid=2 and inputs with eid=3)
     #[clap(long, value_name = "EID[:FID]", value_delimiter = ',')]
@@ -95,14 +100,15 @@ impl FromStr for SkipInput {
 }
 
 /// Temporary directory to store binary seed files
-const TEMP_SEED_DIR: &str = "/tmp/sbifuzz_seed";
+const TEMP_SEED_DIR_PREFIX: &str = "/tmp/sbifuzz_seed";
 
 /// Prepare seed files by converting TOML format to binary format
 ///
 /// This function reads TOML files from the input directory, converts them
 /// to binary format, and writes them to a temporary directory for the fuzzer
-fn prepare_seeds(dir: &PathBuf) {
-    let binary_seed_dir = Path::new(TEMP_SEED_DIR);
+fn prepare_seeds(dir: &PathBuf) -> PathBuf {
+    let binary_seed_dir = PathBuf::from(format!("{}_{}", TEMP_SEED_DIR_PREFIX, process::id()));
+    let binary_seed_dir = binary_seed_dir.as_path();
     // Clean up any existing temporary directory
     if binary_seed_dir.exists() {
         if binary_seed_dir.is_dir() {
@@ -111,31 +117,48 @@ fn prepare_seeds(dir: &PathBuf) {
             fs::remove_file(binary_seed_dir).expect("remove temporary seed file");
         }
     }
-    fs::create_dir(&binary_seed_dir).expect("create temporary seed directory");
+    fs::create_dir(binary_seed_dir).expect("create temporary seed directory");
 
     // Process each TOML file in the input directory
     for entry in WalkDir::new(dir) {
         let entry = entry.unwrap();
         let entry_path = entry.path();
-        let ext = entry_path.extension();
-        if !entry_path.is_file() || ext.is_none() || ext.unwrap() != "toml" {
+        let ext = entry_path.extension().and_then(|value| value.to_str());
+        if !entry_path.is_file() || ext.is_none() {
             continue;
         }
 
-        // Convert TOML to binary format
-        let toml_content = fs::read_to_string(entry_path).expect("read toml file");
-        let toml_data = fix_input_args(input_from_toml(&toml_content));
-        let exec_program = normalize_exec_program(exec_program_from_input(&toml_data));
         let file_name = entry_path
             .file_stem()
             .and_then(|s| s.to_str())
             .unwrap_or("unknown");
         let output_file_path = binary_seed_dir.join(file_name);
-        let mut output_file = File::create(&output_file_path).expect("create binary seed file");
-        output_file
-            .write_all(&exec_program_to_bytes(&exec_program))
-            .expect("write binary seed file");
+
+        match ext.expect("seed extension") {
+            "toml" => {
+                let toml_content = fs::read_to_string(entry_path).expect("read toml file");
+                let toml_data = fix_input_args(input_from_toml(&toml_content));
+                let exec_program = normalize_exec_program(exec_program_from_input(&toml_data));
+                let mut output_file =
+                    File::create(&output_file_path).expect("create binary seed file");
+                output_file
+                    .write_all(&exec_program_to_bytes(&exec_program))
+                    .expect("write binary seed file");
+            }
+            "exec" => {
+                let exec_bytes = fs::read(entry_path).expect("read exec seed file");
+                exec_program_from_bytes(&exec_bytes).expect("validate exec seed file");
+                let mut output_file =
+                    File::create(&output_file_path).expect("create binary seed file");
+                output_file
+                    .write_all(&exec_bytes)
+                    .expect("write binary seed file");
+            }
+            _ => continue,
+        }
     }
+
+    binary_seed_dir.to_path_buf()
 }
 
 /// Generate a function that determines whether to skip a particular input
@@ -181,8 +204,7 @@ fn main() {
     // Convert seed files from TOML to binary format
     let mut seed_dir = None;
     if args.seed.is_some() {
-        prepare_seeds(&args.seed.clone().unwrap());
-        seed_dir = Some(PathBuf::from(TEMP_SEED_DIR));
+        seed_dir = Some(prepare_seeds(&args.seed.clone().unwrap()));
     }
 
     // Start the fuzzing process
@@ -194,6 +216,7 @@ fn main() {
         args.broker_port,
         &args.cores,
         Duration::from_millis(args.timeout),
+        args.smp,
         args.dr_cov,
         args.csv_stats,
         gen_skip_input_fn(args.skip_halt, &args.skip_inputs),
