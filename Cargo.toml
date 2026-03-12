@@ -4,4 +4,10 @@ members = [
     "fuzzer",
     "common",
     "helper",
+    "host_harness",
 ]
+
+[workspace.package]
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/plucky/sbi-fuzz"

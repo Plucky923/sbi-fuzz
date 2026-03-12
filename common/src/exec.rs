@@ -4,6 +4,17 @@ pub const EXEC_BUFFER_SIZE: usize = 4 << 10;
 pub const EXEC_MAGIC: &[u8; 8] = b"SBIEXEC1";
 pub const EXEC_NO_COPYOUT: u64 = u64::MAX;
 pub const EXEC_MAX_ARGS: usize = 8;
+pub const EXEC_MAX_RESULTS: usize = 128;
+pub const SBI_ORACLE_BUFFER_SYMBOL: &str = "SBI_ORACLE_FAILURE_BUFFER";
+pub const SBI_ORACLE_BUFFER_WORDS: usize = 9;
+pub const EXEC_ORACLE_FAILURE_CODE: u64 = 0x5342_494f_5243_4c45;
+pub const EXEC_ORACLE_KIND_HSM_HART0_STATUS: u64 = 1;
+pub const EXEC_ORACLE_KIND_PURE_CALL_MISMATCH: u64 = 2;
+pub const EXEC_PROP_KIND_SHIFT: u64 = 56;
+pub const EXEC_PROP_VALUE_MASK: u64 = (1_u64 << EXEC_PROP_KIND_SHIFT) - 1;
+pub const EXEC_PROP_TARGET_HART: u64 = 1;
+pub const EXEC_PROP_BUSY_WAIT: u64 = 2;
+const EXEC_VALID_ARG_SIZES: [u64; 4] = [1, 2, 4, 8];
 
 const EXEC_INSTR_EOF: u64 = u64::MAX;
 const EXEC_INSTR_COPYIN: u64 = u64::MAX - 1;
@@ -122,6 +133,18 @@ pub struct ExecProgram {
     pub instructions: Vec<ExecInstr>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExecOracleFailure {
+    pub kind: u64,
+    pub instr_index: u64,
+    pub arg0: u64,
+    pub arg1: u64,
+    pub observed_error: u64,
+    pub observed_value: u64,
+    pub expected_error: u64,
+    pub expected_value: u64,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExecInstr {
     CopyIn {
@@ -172,6 +195,127 @@ impl ExecProgram {
             .filter(|instr| matches!(instr, ExecInstr::Call { .. }))
             .count() as u64
     }
+}
+
+pub fn exec_prop_target_hart(hart_id: u64) -> u64 {
+    encode_exec_prop(EXEC_PROP_TARGET_HART, hart_id)
+}
+
+pub fn exec_prop_busy_wait(iterations: u64) -> u64 {
+    encode_exec_prop(EXEC_PROP_BUSY_WAIT, iterations)
+}
+
+pub fn decode_exec_prop(value: u64) -> (u64, u64) {
+    (value >> EXEC_PROP_KIND_SHIFT, value & EXEC_PROP_VALUE_MASK)
+}
+
+pub fn format_exec_prop(value: u64) -> String {
+    let (kind, payload) = decode_exec_prop(value);
+    match kind {
+        EXEC_PROP_TARGET_HART => format!("target_hart={payload}"),
+        EXEC_PROP_BUSY_WAIT => format!("busy_wait={payload}"),
+        _ => format!("raw=0x{value:x}"),
+    }
+}
+
+pub fn sbi_oracle_buffer_bytes() -> usize {
+    SBI_ORACLE_BUFFER_WORDS * core::mem::size_of::<u64>()
+}
+
+pub fn sbi_oracle_zero_buffer() -> Vec<u8> {
+    vec![0; sbi_oracle_buffer_bytes()]
+}
+
+pub fn parse_exec_oracle_buffer(bytes: &[u8]) -> Result<Option<ExecOracleFailure>, String> {
+    if bytes.len() != sbi_oracle_buffer_bytes() {
+        return Err(format!(
+            "oracle buffer size {} does not match expected {}",
+            bytes.len(),
+            sbi_oracle_buffer_bytes()
+        ));
+    }
+
+    let mut words = [0_u64; SBI_ORACLE_BUFFER_WORDS];
+    for (index, chunk) in bytes.chunks_exact(core::mem::size_of::<u64>()).enumerate() {
+        words[index] = u64::from_le_bytes(
+            chunk
+                .try_into()
+                .expect("oracle buffer chunks must match word size"),
+        );
+    }
+
+    if words[0] == 0 {
+        return Ok(None);
+    }
+
+    Ok(Some(ExecOracleFailure {
+        kind: words[1],
+        instr_index: words[2],
+        arg0: words[3],
+        arg1: words[4],
+        observed_error: words[5],
+        observed_value: words[6],
+        expected_error: words[7],
+        expected_value: words[8],
+    }))
+}
+
+pub fn encode_exec_oracle_buffer(failure: &ExecOracleFailure) -> Vec<u8> {
+    let mut words = [0_u64; SBI_ORACLE_BUFFER_WORDS];
+    words[0] = 1;
+    words[1] = failure.kind;
+    words[2] = failure.instr_index;
+    words[3] = failure.arg0;
+    words[4] = failure.arg1;
+    words[5] = failure.observed_error;
+    words[6] = failure.observed_value;
+    words[7] = failure.expected_error;
+    words[8] = failure.expected_value;
+
+    let mut bytes = Vec::with_capacity(sbi_oracle_buffer_bytes());
+    for word in words {
+        bytes.extend_from_slice(&word.to_le_bytes());
+    }
+    bytes
+}
+
+pub fn format_exec_oracle_failure(failure: &ExecOracleFailure) -> String {
+    match failure.kind {
+        EXEC_ORACLE_KIND_HSM_HART0_STATUS => format!(
+            "oracle=hsm_hart0_status instr={} caller_hart={} observed_error=0x{:x} observed_value=0x{:x} expected_error=0x{:x} expected_value=0x{:x}",
+            failure.instr_index,
+            failure.arg1,
+            failure.observed_error,
+            failure.observed_value,
+            failure.expected_error,
+            failure.expected_value
+        ),
+        EXEC_ORACLE_KIND_PURE_CALL_MISMATCH => format!(
+            "oracle=pure_call_mismatch instr={} eid=0x{:x} fid=0x{:x} observed_error=0x{:x} observed_value=0x{:x} expected_error=0x{:x} expected_value=0x{:x}",
+            failure.instr_index,
+            failure.arg0,
+            failure.arg1,
+            failure.observed_error,
+            failure.observed_value,
+            failure.expected_error,
+            failure.expected_value
+        ),
+        _ => format!(
+            "oracle=unknown kind={} instr={} arg0=0x{:x} arg1=0x{:x} observed_error=0x{:x} observed_value=0x{:x} expected_error=0x{:x} expected_value=0x{:x}",
+            failure.kind,
+            failure.instr_index,
+            failure.arg0,
+            failure.arg1,
+            failure.observed_error,
+            failure.observed_value,
+            failure.expected_error,
+            failure.expected_value
+        ),
+    }
+}
+
+fn encode_exec_prop(kind: u64, payload: u64) -> u64 {
+    (kind << EXEC_PROP_KIND_SHIFT) | (payload & EXEC_PROP_VALUE_MASK)
 }
 
 pub fn exec_call_desc(call_id: u64) -> Option<&'static ExecCallDesc> {
@@ -403,7 +547,7 @@ pub fn exec_program_from_bytes(bytes: &[u8]) -> Result<ExecProgram, String> {
         return Err("missing syz-exec magic".to_string());
     }
     let mut pos = EXEC_MAGIC.len();
-    let _call_count = read_varint(bytes, &mut pos)?;
+    let declared_call_count = read_varint(bytes, &mut pos)? as usize;
     let mut instructions = Vec::new();
 
     while pos < bytes.len() {
@@ -451,7 +595,68 @@ pub fn exec_program_from_bytes(bytes: &[u8]) -> Result<ExecProgram, String> {
         instructions.push(instr);
     }
 
-    Ok(ExecProgram { instructions })
+    let program = ExecProgram { instructions };
+    if program.call_count() != declared_call_count as u64 {
+        return Err(format!(
+            "exec call count mismatch: header={declared_call_count} actual={}",
+            program.call_count()
+        ));
+    }
+    validate_exec_program(&program)?;
+    Ok(program)
+}
+
+pub fn validate_exec_program(program: &ExecProgram) -> Result<(), String> {
+    for (index, instr) in program.instructions.iter().enumerate() {
+        match instr {
+            ExecInstr::CopyIn { addr, arg } => {
+                validate_exec_addr(*addr, format!("copyin[{index}] addr"))?;
+                validate_exec_arg(arg, format!("copyin[{index}] arg"))?;
+            }
+            ExecInstr::CopyOut {
+                index: slot,
+                addr,
+                size,
+            } => {
+                if *slot >= EXEC_MAX_RESULTS as u64 {
+                    return Err(format!("copyout[{index}] result slot out of range: {slot}"));
+                }
+                validate_exec_addr(*addr, format!("copyout[{index}] addr"))?;
+                validate_exec_scalar_size(*size, format!("copyout[{index}] size"))?;
+            }
+            ExecInstr::SetProps { .. } => {}
+            ExecInstr::Call {
+                call_id,
+                copyout_index,
+                args,
+            } => {
+                let Some(desc) = exec_call_desc(*call_id) else {
+                    return Err(format!("call[{index}] unknown id: {call_id}"));
+                };
+                let expected_args = match desc.kind {
+                    ExecCallKind::RawEcall => 8,
+                    ExecCallKind::Fixed { .. } => 6,
+                };
+                if args.len() != expected_args {
+                    return Err(format!(
+                        "call[{index}] unexpected arg count for {}: got {} expected {}",
+                        desc.name,
+                        args.len(),
+                        expected_args
+                    ));
+                }
+                if *copyout_index != EXEC_NO_COPYOUT && *copyout_index >= EXEC_MAX_RESULTS as u64 {
+                    return Err(format!(
+                        "call[{index}] copyout slot out of range: {copyout_index}"
+                    ));
+                }
+                for (arg_index, arg) in args.iter().enumerate() {
+                    validate_exec_call_arg(arg, format!("call[{index}] arg[{arg_index}]"))?;
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 pub fn exec_program_primary_input(program: &ExecProgram) -> Option<InputData> {
@@ -478,7 +683,10 @@ pub fn exec_program_describe(program: &ExecProgram) -> String {
                 ));
             }
             ExecInstr::SetProps { value } => {
-                lines.push(format!("[{index}] setprops value=0x{value:x}"));
+                lines.push(format!(
+                    "[{index}] setprops value=0x{value:x} ({})",
+                    format_exec_prop(*value)
+                ));
             }
             ExecInstr::Call {
                 call_id,
@@ -621,6 +829,42 @@ fn read_exec_arg(bytes: &[u8], pos: &mut usize) -> Result<ExecArg, String> {
         }
         other => Err(format!("unknown exec arg type: {other}")),
     }
+}
+
+fn validate_exec_arg(arg: &ExecArg, context: String) -> Result<(), String> {
+    match arg {
+        ExecArg::Const { size, .. } | ExecArg::Result { size, .. } => {
+            validate_exec_scalar_size(*size, format!("{context} size"))?
+        }
+        ExecArg::Addr32 { offset } | ExecArg::Addr64 { offset } => {
+            validate_exec_addr(*offset, format!("{context} offset"))?
+        }
+        ExecArg::Data(_) => {}
+    }
+    Ok(())
+}
+
+fn validate_exec_call_arg(arg: &ExecArg, context: String) -> Result<(), String> {
+    if matches!(arg, ExecArg::Data(_)) {
+        return Err(format!(
+            "{context} data arg is only valid for copyin instructions"
+        ));
+    }
+    validate_exec_arg(arg, context)
+}
+
+fn validate_exec_scalar_size(size: u64, context: String) -> Result<(), String> {
+    if !EXEC_VALID_ARG_SIZES.contains(&size) {
+        return Err(format!("{context} invalid scalar size: {size}"));
+    }
+    Ok(())
+}
+
+fn validate_exec_addr(addr: u64, context: String) -> Result<(), String> {
+    if addr >= EXEC_BUFFER_SIZE as u64 {
+        return Err(format!("{context} out of exec buffer range: 0x{addr:x}"));
+    }
+    Ok(())
 }
 
 fn write_varint(value: u64, buf: &mut Vec<u8>) {

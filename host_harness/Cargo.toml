@@ -1,0 +1,12 @@
+[package]
+name = "host_harness"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+common = { path = "../common" }
+serde = { version = "1.0.218", features = ["derive"] }
+rustsbi = { path = "../playground/rustsbi-fuzz/output/rustsbi/library/rustsbi", default-features = false }
+
+[build-dependencies]
+cc = "1.2.16"

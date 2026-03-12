@@ -61,6 +61,44 @@ fn malformed_bytes(
 }
 
 #[test]
+fn exec_props_are_encoded_and_described() {
+    let target = exec_prop_target_hart(3);
+    let busy_wait = exec_prop_busy_wait(0x1234);
+
+    assert_eq!(decode_exec_prop(target), (EXEC_PROP_TARGET_HART, 3));
+    assert_eq!(decode_exec_prop(busy_wait), (EXEC_PROP_BUSY_WAIT, 0x1234));
+    assert_eq!(format_exec_prop(target), "target_hart=3");
+    assert_eq!(format_exec_prop(busy_wait), "busy_wait=4660");
+}
+
+#[test]
+fn oracle_buffer_round_trip_and_format() {
+    let failure = ExecOracleFailure {
+        kind: EXEC_ORACLE_KIND_PURE_CALL_MISMATCH,
+        instr_index: 7,
+        arg0: 0x10,
+        arg1: 2,
+        observed_error: 0,
+        observed_value: 0x22,
+        expected_error: 0,
+        expected_value: 0x11,
+    };
+
+    let encoded = encode_exec_oracle_buffer(&failure);
+    let decoded = parse_exec_oracle_buffer(&encoded)
+        .expect("parse oracle buffer")
+        .expect("oracle failure should be present");
+
+    assert_eq!(decoded, failure);
+    assert!(format_exec_oracle_failure(&decoded).contains("pure_call_mismatch"));
+    assert!(
+        parse_exec_oracle_buffer(&sbi_oracle_zero_buffer())
+            .expect("parse zeroed oracle buffer")
+            .is_none()
+    );
+}
+
+#[test]
 fn validate_registry_is_consistent() {
     validate_exec_call_table().expect("registry should validate");
     assert!(format_exec_call_table().contains("raw_ecall"));
@@ -127,7 +165,9 @@ fn round_trip_multi_call_program() {
                 addr: 0x20,
                 size: 8,
             },
-            ExecInstr::SetProps { value: 0x10 },
+            ExecInstr::SetProps {
+                value: exec_prop_target_hart(1),
+            },
             ExecInstr::Call {
                 call_id: 0,
                 copyout_index: EXEC_NO_COPYOUT,
@@ -159,6 +199,7 @@ fn round_trip_multi_call_program() {
     assert_eq!(decoded, program);
     assert_eq!(decoded.call_count(), 2);
     assert!(exec_program_describe(&decoded).contains("copyout slot=3"));
+    assert!(exec_program_describe(&decoded).contains("target_hart=1"));
 }
 
 #[test]
@@ -186,6 +227,19 @@ fn malformed_exec_bytes_are_rejected() {
             .expect_err("truncated data should fail")
             .contains("exec data arg overflow")
     );
+
+    let mut bad_arity = Vec::new();
+    bad_arity.extend_from_slice(EXEC_MAGIC);
+    encode_varint(1, &mut bad_arity);
+    encode_varint(2, &mut bad_arity);
+    encode_varint(EXEC_NO_COPYOUT, &mut bad_arity);
+    encode_varint(0, &mut bad_arity);
+    encode_varint(u64::MAX, &mut bad_arity);
+    assert!(
+        exec_program_from_bytes(&bad_arity)
+            .expect_err("fixed call with zero args should fail")
+            .contains("unexpected arg count")
+    );
 }
 
 #[test]
@@ -195,6 +249,69 @@ fn absurd_argument_count_is_rejected() {
         exec_program_from_bytes(&bytes)
             .expect_err("huge nargs should fail")
             .contains("too many args")
+    );
+}
+
+#[test]
+fn call_count_mismatch_is_rejected() {
+    let program = ExecProgram {
+        instructions: vec![
+            ExecInstr::Call {
+                call_id: 2,
+                copyout_index: EXEC_NO_COPYOUT,
+                args: vec![
+                    ExecArg::Const { size: 8, value: 1 },
+                    ExecArg::Const { size: 8, value: 0 },
+                    ExecArg::Const { size: 8, value: 0 },
+                    ExecArg::Const { size: 8, value: 0 },
+                    ExecArg::Const { size: 8, value: 0 },
+                    ExecArg::Const { size: 8, value: 0 },
+                ],
+            },
+            ExecInstr::Call {
+                call_id: 2,
+                copyout_index: EXEC_NO_COPYOUT,
+                args: vec![
+                    ExecArg::Const { size: 8, value: 2 },
+                    ExecArg::Const { size: 8, value: 0 },
+                    ExecArg::Const { size: 8, value: 0 },
+                    ExecArg::Const { size: 8, value: 0 },
+                    ExecArg::Const { size: 8, value: 0 },
+                    ExecArg::Const { size: 8, value: 0 },
+                ],
+            },
+        ],
+    };
+    let mut encoded = exec_program_to_bytes(&program);
+    encoded[EXEC_MAGIC.len()] = 2;
+    assert!(
+        exec_program_from_bytes(&encoded)
+            .expect_err("call count mismatch should fail")
+            .contains("call count mismatch")
+    );
+}
+
+#[test]
+fn invalid_const_size_is_rejected() {
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(EXEC_MAGIC);
+    encode_varint(1, &mut bytes);
+    encode_varint(0, &mut bytes);
+    encode_varint(EXEC_NO_COPYOUT, &mut bytes);
+    encode_varint(8, &mut bytes);
+    encode_varint(0, &mut bytes);
+    encode_varint(0, &mut bytes);
+    encode_varint(0, &mut bytes);
+    for _ in 0..7 {
+        encode_varint(0, &mut bytes);
+        encode_varint(8, &mut bytes);
+        encode_varint(0, &mut bytes);
+    }
+    encode_varint(u64::MAX, &mut bytes);
+    assert!(
+        exec_program_from_bytes(&bytes)
+            .expect_err("invalid scalar size should fail")
+            .contains("invalid scalar size")
     );
 }
 
@@ -218,6 +335,35 @@ fn fix_input_args_is_idempotent_for_known_calls() {
         assert_eq!(once.args.arg4, twice.args.arg4);
         assert_eq!(once.args.arg5, twice.args.arg5);
     }
+}
+
+#[test]
+fn data_arg_inside_call_is_rejected() {
+    let program = ExecProgram {
+        instructions: vec![ExecInstr::Call {
+            call_id: 0,
+            copyout_index: EXEC_NO_COPYOUT,
+            args: vec![
+                ExecArg::Const {
+                    size: 8,
+                    value: 0x10,
+                },
+                ExecArg::Const { size: 8, value: 0 },
+                ExecArg::Const { size: 8, value: 0 },
+                ExecArg::Const { size: 8, value: 0 },
+                ExecArg::Data(vec![1, 2, 3, 4]),
+                ExecArg::Const { size: 8, value: 0 },
+                ExecArg::Const { size: 8, value: 0 },
+                ExecArg::Const { size: 8, value: 0 },
+            ],
+        }],
+    };
+    let encoded = exec_program_to_bytes(&program);
+    assert!(
+        exec_program_from_bytes(&encoded)
+            .expect_err("data arg in call should fail")
+            .contains("data arg is only valid for copyin instructions")
+    );
 }
 
 #[test]

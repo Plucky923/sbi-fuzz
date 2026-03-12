@@ -264,10 +264,11 @@ dependencies = [
 
 [[package]]
 name = "cc"
-version = "1.2.15"
+version = "1.2.56"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c736e259eea577f443d5c86c304f9f4ae0295c43f3ba05c21f1d66b5f06001af"
+checksum = "aebf35691d1bfb0ac386a69bac2fde4dd276fb618cf8bf4f5318fe285e821bb2"
 dependencies = [
+ "find-msvc-tools",
  "jobserver",
  "libc",
  "shlex",
@@ -377,6 +378,7 @@ version = "0.1.0"
 dependencies = [
  "regex",
  "serde",
+ "serde_json",
  "sha2",
  "toml",
 ]
@@ -453,6 +455,12 @@ checksum = "a97769d94ddab943e4510d138150169a2758b5ef3eb191a9ee688de3e23ef7b3"
 dependencies = [
  "cfg-if",
 ]
+
+[[package]]
+name = "critical-section"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "790eea4361631c5e7d22598ecd5723ff611904e3344ce8720784c93e3d83d40b"
 
 [[package]]
 name = "crossterm"
@@ -572,6 +580,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b7914353092ddf589ad78f25c5c1c21b7f80b0ff8621e7c814c3485b5306da9d"
 
 [[package]]
+name = "embedded-hal"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "361a90feb7004eca4019fb28352a9465666b24f840f5c3cddf0ff13920590b89"
+
+[[package]]
 name = "embedded-io"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -674,6 +688,12 @@ name = "fastrand"
 version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "37909eebbb50d72f9059c3b6d82c0463f2ff062c9e95845c43a6c9c0355411be"
+
+[[package]]
+name = "find-msvc-tools"
+version = "0.1.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5baebc0774151f905a1a2cc41989300b1e6fbb29aff0ceffa1064fdd3088d582"
 
 [[package]]
 name = "flate2"
@@ -833,12 +853,15 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "common",
+ "host_harness",
  "libafl",
  "libafl_bolts",
  "libafl_qemu",
  "libafl_qemu_build",
  "libafl_targets",
  "regex",
+ "serde",
+ "serde_json",
  "tempfile",
  "walkdir",
 ]
@@ -850,6 +873,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "589533453244b0995c858700322199b2becb13b627df2851f64a2775d024abcf"
 dependencies = [
  "windows-sys 0.59.0",
+]
+
+[[package]]
+name = "host_harness"
+version = "0.1.0"
+dependencies = [
+ "cc",
+ "common",
+ "rustsbi",
+ "serde",
 ]
 
 [[package]]
@@ -1539,6 +1572,24 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2b15c43186be67a4fd63bee50d0303afffcef381492ebe2c5d87f324e1b8815c"
 
 [[package]]
+name = "riscv"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5ea8ff73d3720bdd0a97925f0bf79ad2744b6da8ff36be3840c48ac81191d7a7"
+dependencies = [
+ "critical-section",
+ "embedded-hal",
+ "paste",
+ "riscv-pac",
+]
+
+[[package]]
+name = "riscv-pac"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8188909339ccc0c68cfb5a04648313f09621e8b87dc03095454f1a11f6c5d436"
+
+[[package]]
 name = "rustc-demangle"
 version = "0.1.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1570,6 +1621,25 @@ dependencies = [
  "libc",
  "linux-raw-sys",
  "windows-sys 0.59.0",
+]
+
+[[package]]
+name = "rustsbi"
+version = "0.4.0"
+dependencies = [
+ "riscv",
+ "rustsbi-macros",
+ "sbi-rt",
+ "sbi-spec",
+]
+
+[[package]]
+name = "rustsbi-macros"
+version = "0.0.2"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]
@@ -1609,6 +1679,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "93fc1dc3aaa9bfed95e02e6eadabb4baf7e3078b0bd1b4d7b6b0b68378900502"
 dependencies = [
  "winapi-util",
+]
+
+[[package]]
+name = "sbi-rt"
+version = "0.0.3"
+dependencies = [
+ "sbi-spec",
+]
+
+[[package]]
+name = "sbi-spec"
+version = "0.0.8"
+dependencies = [
+ "bitflags",
+ "static_assertions",
 ]
 
 [[package]]

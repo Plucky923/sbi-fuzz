@@ -2,9 +2,13 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use sha2::{Digest, Sha256};
 use std::num::ParseIntError;
 
+mod coverage;
 mod exec;
+mod host;
 
+pub use coverage::*;
 pub use exec::*;
+pub use host::*;
 
 /// Represents the complete input data structure for SBI calls
 /// Contains both metadata and arguments
@@ -224,11 +228,15 @@ where
 /// Parse TOML content into InputData structure
 /// Handles conversion of hex literals in TOML to proper format
 pub fn input_from_toml(toml_content: &str) -> InputData {
+    try_input_from_toml(toml_content).expect("parse toml")
+}
+
+pub fn try_input_from_toml(toml_content: &str) -> Result<InputData, String> {
     let re = regex::Regex::new(r#"(=\s*)(0x[0-9A-Fa-f]+)"#).expect("compile regex");
     let toml_content = re.replace_all(&toml_content, r#"$1"$2""#).to_string();
-    let mut input: InputData = toml::from_str(&toml_content).expect("parse toml");
+    let mut input: InputData = toml::from_str(&toml_content).map_err(|err| err.to_string())?;
     input.refresh_metadata();
-    input
+    Ok(input)
 }
 
 /// Size of binary input representation in bytes
@@ -550,7 +558,8 @@ fn is_get_pmu_event_info(eid: u64, fid: u64) -> bool {
     res
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum SbiError {
     Success,
     Failed,
