@@ -3,4 +3,4 @@ from sbi_results import triage_cli
 
 
 if __name__ == "__main__":
-    raise SystemExit(triage_cli("OpenSBI"))
+    raise SystemExit(triage_cli())

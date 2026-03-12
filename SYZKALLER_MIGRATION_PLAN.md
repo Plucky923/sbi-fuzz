@@ -46,6 +46,8 @@
 - [x] 已完成 OpenSBI 结果 triage 与 replay 基础设施：新增 `scripts/triage-opensbi-results.py`、`scripts/replay-opensbi-results.py`，并验证 `.exec` 回放优先于 `.toml` 更保真。
 - [x] 已完成 OpenSBI sanitizer-demo 样本验证：固定 `test-heap-overflow.toml` 可稳定观察到 `KASAN` 输出，`test-integer-overflow.toml` 可稳定观察到 `UBSAN` 输出。
 - [x] 首轮真实 fuzz 暴露并修复了一个实际缺陷：`exec_program_from_bytes` 对异常 `nargs` 缺少边界检查，已补上并新增回归测试。
+- [~] `Step 5` 已完成 shared-memory 覆盖率基础设施：新增 `common/src/coverage.rs`、固定 buffer 地址 `0x809fc000`、injector `SBI_COVERAGE_BUFFER`、`helper coverage-info` / `collect-coverage`，并在 `helper` / `fuzzer` 中接入 reset/collect + fallback signal 桥接；`instrument-kasan` 现会为 OpenSBI 注入 `trace-pc` shared-coverage hook，`helper run` 可做基础 PC 符号化，且新增 `scripts/check-opensbi-coverage.py` 与 `make test-opensbi-coverage` 用于 `cover.raw` / `cover.json` 导出和稳定性 smoke。
+- [~] `Step 6` 已完成第一版 bug-report 闭环：`replay-opensbi-results.py` 现输出 `classification/signals/signature`，新增 `report-opensbi-bugs.py` 与 `make -C playground/opensbi-fuzz bug-report`，可把 replay 结果按 sanitizer/crash/hang bucket 聚合。
 
 ## 2. 计划使用原则
 

@@ -17,5 +17,7 @@ python3 "$repo_root/scripts/replay-opensbi-results.py" \
 
 rg -n '"total": 1' "$out_json" >/dev/null
 rg -n '"actual":' "$out_json" >/dev/null
+rg -n '"classification":' "$out_json" >/dev/null
+rg -n '"interesting":' "$out_json" >/dev/null
 
 echo "opensbi replay test passed"

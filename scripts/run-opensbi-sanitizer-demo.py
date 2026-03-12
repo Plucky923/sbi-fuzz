@@ -40,9 +40,23 @@ def main() -> int:
 
     results = []
     for input_path in args.inputs:
-        cmd = [args.helper_bin, "run", str(args.target), str(args.injector), str(input_path)]
+        cmd = [
+            args.helper_bin,
+            "run",
+            str(args.target),
+            str(args.injector),
+            str(input_path),
+            "--timeout-ms",
+            str(max(1, args.timeout_secs) * 1000),
+        ]
         try:
-            proc = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=args.timeout_secs)
+            proc = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                env=env,
+                timeout=args.timeout_secs + 30,
+            )
             output = proc.stdout + proc.stderr
             timed_out = False
             returncode = proc.returncode
