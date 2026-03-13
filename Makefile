@@ -67,6 +67,18 @@ test-sbi-hang-semantic-buckets:
 test-rustsbi-fuzz-finds-bug:
 	@./scripts/test-rustsbi-fuzz-finds-bug.sh
 
+test-sequence-replay:
+	@./scripts/test-replay-sequence-results.sh
+
+sequence-seeds:
+	@cargo run -q -p helper -- generate-sequence-seeds --target-kind both ./output/sequence
+
+campaign-sequence-opensbi: sequence-seeds
+	@python3 ./scripts/run-sequence-campaign.py opensbi-sequence opensbi ./output/sequence --json-out ./output/sequence/opensbi-sequence.campaign.json
+
+campaign-sequence-rustsbi: sequence-seeds
+	@python3 ./scripts/run-sequence-campaign.py rustsbi-sequence rustsbi ./output/sequence --json-out ./output/sequence/rustsbi-sequence.campaign.json
+
 campaign-opensbi:
 	@$(MAKE) -C playground/opensbi-fuzz campaign
 
@@ -140,6 +152,10 @@ help:
 	@echo "  test-rustsbi-hang-minimize - Verify stable RustSBI hangs are auto-minimized into shorter .exec PoCs"
 	@echo "  test-sbi-hang-semantic-buckets - Verify stable hangs split into semantic buckets instead of one Timeout bucket"
 	@echo "  test-rustsbi-fuzz-finds-bug - Run a short RustSBI complex campaign and require a real bug-like finding"
+	@echo "  test-sequence-replay   - Replay and campaign unified .seq inputs against a single target"
+	@echo "  sequence-seeds         - Generate unified .seq seeds for OpenSBI and RustSBI"
+	@echo "  campaign-sequence-opensbi - Run host-side .seq campaign against OpenSBI"
+	@echo "  campaign-sequence-rustsbi - Run host-side .seq campaign against RustSBI"
 	@echo "  campaign-opensbi      - Run full OpenSBI fuzz/triage/replay/report campaign"
 	@echo "  campaign-rustsbi      - Run full RustSBI prototyper fuzz campaign"
 	@echo "  campaign-rustsbi-complex - Run RustSBI multi-call/multi-hart-oriented campaign"
@@ -153,4 +169,4 @@ help:
 	@echo "  clean-generated        - Clean generated local samples and reports"
 	@echo "  help                   - Display this help message"
 
-.PHONY: all compile check-env check-env-smoke test-common test-host-harness test-linux-corpus-import test-opensbi-triage test-opensbi-replay test-opensbi-replay-summary test-opensbi-sanitizer-demo test-opensbi-coverage test-opensbi-bug-report test-rustsbi-scenarios test-rustsbi-replay test-rustsbi-helper-timeout test-rustsbi-collect-coverage-timeout test-rustsbi-hang-stability test-rustsbi-hang-minimize test-sbi-hang-semantic-buckets test-rustsbi-fuzz-finds-bug campaign-opensbi campaign-rustsbi campaign-rustsbi-complex fuzzer helper injector clean clean-cargo clean-injector clean-playgrounds clean-generated help
+.PHONY: all compile check-env check-env-smoke test-common test-host-harness test-linux-corpus-import test-opensbi-triage test-opensbi-replay test-opensbi-replay-summary test-opensbi-sanitizer-demo test-opensbi-coverage test-opensbi-bug-report test-rustsbi-scenarios test-rustsbi-replay test-rustsbi-helper-timeout test-rustsbi-collect-coverage-timeout test-rustsbi-hang-stability test-rustsbi-hang-minimize test-sbi-hang-semantic-buckets test-rustsbi-fuzz-finds-bug test-sequence-replay sequence-seeds campaign-sequence-opensbi campaign-sequence-rustsbi campaign-opensbi campaign-rustsbi campaign-rustsbi-complex fuzzer helper injector clean clean-cargo clean-injector clean-playgrounds clean-generated help

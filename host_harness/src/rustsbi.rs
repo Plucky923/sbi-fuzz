@@ -386,7 +386,10 @@ impl Hsm for MockHsm {
             return state.success_or_fault(0, false);
         }
         if state.hart_state != HostHartState::Started {
-            return SbiRet::invalid_state();
+            return SbiRet {
+                error: SbiError::InvalidState.code() as usize,
+                value: 0,
+            };
         }
         state.success_or_fault(0, true)
     }

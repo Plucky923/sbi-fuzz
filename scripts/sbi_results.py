@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -61,9 +62,42 @@ PATTERNS = {
         re.I,
     ),
 }
+SEQUENCE_MAGIC = b"SBISEQ\x00\x00"
+SEQUENCE_RESULT_KINDS = {"ok", "interesting", "expectation_failed", "match", "divergence", "capability_mismatch"}
+
+
+def get_extension_name(eid: int) -> str:
+    return {
+        0x10: "base",
+        0x54494D45: "time",
+        0x735049: "ipi",
+        0x52464E43: "rfence",
+        0x48534D: "hsm",
+        0x53525354: "reset",
+        0x4442434E: "console",
+        0x504D55: "pmu",
+    }.get(eid, "unknown")
+
+
+def load_sequence_program(path: Path):
+    raw = path.read_bytes()
+    if raw.startswith(SEQUENCE_MAGIC):
+        if len(raw) < len(SEQUENCE_MAGIC) + 4:
+            raise ValueError(f"sequence input too short: {path}")
+        payload_len = int.from_bytes(raw[len(SEQUENCE_MAGIC):len(SEQUENCE_MAGIC) + 4], "little")
+        payload = raw[len(SEQUENCE_MAGIC) + 4:]
+        if len(payload) != payload_len:
+            raise ValueError(
+                f"sequence payload length mismatch for {path}: header={payload_len} actual={len(payload)}"
+            )
+        return json.loads(payload.decode())
+    return json.loads(raw.decode())
 
 
 def load_case(path: Path):
+    if path.suffix == ".seq":
+        return load_sequence_case(path)
+
     data = tomllib.loads(path.read_text())
     metadata = data.get("metadata", {})
     args = data.get("args", {})
@@ -95,6 +129,7 @@ def load_case(path: Path):
     raw_exec = path.parent / ".raw" / f"{hash_value}.exec"
     return {
         "path": str(path),
+        "input_kind": "legacy_call",
         "toml": path,
         "raw_exec": raw_exec if raw_exec.exists() else None,
         "raw_exec_exists": raw_exec.exists(),
@@ -111,6 +146,82 @@ def load_case(path: Path):
         "nonzero_slots": nonzero_slots,
         "flags": flags,
     }
+
+
+def load_sequence_case(path: Path):
+    data = load_sequence_program(path)
+    metadata = data.get("metadata", {})
+    env = data.get("env", {})
+    steps = data.get("steps", [])
+    first_call = next((step for step in steps if step.get("kind") == "call"), None)
+    source = metadata.get("source", "")
+    match = SOURCE_RE.search(source)
+    hash_value = (
+        match.group(1)
+        if match
+        else hashlib.sha256(path.read_bytes()).hexdigest()[:8]
+    )
+    status = match.group(2) if match else "Ok"
+    eid = first_call.get("eid", 0) if first_call else 0
+    fid = first_call.get("fid", 0) if first_call else 0
+    extension = get_extension_name(eid)
+    flags = ["sequence"]
+    if data.get("memory"):
+        flags.append("has_memory_objects")
+    if len([step for step in steps if step.get("kind") == "call"]) > 1:
+        flags.append("multi_call")
+    if env.get("smp", 1) > 1:
+        flags.append("multi_hart")
+    if any(step.get("kind") == "parse_fdt" for step in steps):
+        flags.append("has_fdt")
+    if any(step.get("kind") == "set_platform_fault" for step in steps):
+        flags.append("platform_fault")
+    if any(
+        step.get("kind") in {"set_hart_state", "set_privilege", "set_platform_fault", "parse_fdt"}
+        for step in steps
+    ):
+        flags.append("host_only_steps")
+    impl_hint = env.get("impl_hint")
+    if impl_hint:
+        flags.append(f"impl_hint:{impl_hint}")
+    return {
+        "path": str(path),
+        "input_kind": "sequence",
+        "sequence": path,
+        "raw_exec": None,
+        "raw_exec_exists": False,
+        "hash": hash_value,
+        "status": status,
+        "expected": "ok",
+        "extension": extension,
+        "sequence_name": metadata.get("name") or path.stem,
+        "source": source,
+        "eid": eid,
+        "fid": fid,
+        "args": [0, 0, 0, 0, 0, 0],
+        "schema": ["value"] * 6,
+        "address_slots": [],
+        "nonzero_slots": [],
+        "flags": flags,
+        "impl_hint": impl_hint,
+        "semantic_signature": ";".join(
+            f"{step.get('kind')}:{step.get('label', '')}" for step in steps
+        ),
+    }
+
+
+def sequence_target_matches(case: dict, target_kind: str):
+    impl_hint = case.get("impl_hint")
+    if not impl_hint:
+        return True
+    normalized = str(impl_hint).replace("_", "").lower()
+    return normalized == target_kind.lower()
+
+
+def collect_cases(result_dir: Path):
+    cases = [load_case(path) for path in sorted(result_dir.glob("*.toml"))]
+    cases.extend(load_case(path) for path in sorted(result_dir.glob("*.seq")))
+    return cases
 
 
 def resolve_helper_cmd(explicit: str | None):
@@ -192,25 +303,26 @@ def classify_output(output: str, actual: str, expected: str):
 def summarize_triage(cases):
     by_status = Counter(case["status"] for case in cases)
     by_extension = Counter(case["extension"] for case in cases)
-    by_bucket = Counter(
-        f"{case['extension']}:{case['fid']:x}:{case['status']}" for case in cases
-    )
+    by_input_kind = Counter(case.get("input_kind", "legacy_call") for case in cases)
+    by_bucket = Counter(bucket_name(case) for case in cases)
     flag_counts = Counter(flag for case in cases for flag in case["flags"])
 
     representatives = {}
     for case in cases:
-        bucket = f"{case['extension']}:{case['fid']:x}:{case['status']}"
+        bucket = bucket_name(case)
         representatives.setdefault(bucket, case)
 
     return {
         "total_cases": len(cases),
         "by_status": dict(by_status),
         "by_extension": dict(by_extension),
+        "by_input_kind": dict(by_input_kind),
         "by_bucket": dict(by_bucket),
         "flag_counts": dict(flag_counts),
         "representatives": {
             bucket: {
                 "path": rep["path"],
+                "input_kind": rep.get("input_kind", "legacy_call"),
                 "eid": f"0x{rep['eid']:X}",
                 "fid": f"0x{rep['fid']:X}",
                 "flags": rep["flags"],
@@ -235,6 +347,9 @@ def write_triage_markdown(summary, output: Path, label: str):
     lines += ["", "## By Extension", ""]
     for key, value in sorted(summary["by_extension"].items()):
         lines.append(f"- `{key}`: {value}")
+    lines += ["", "## By Input Kind", ""]
+    for key, value in sorted(summary.get("by_input_kind", {}).items()):
+        lines.append(f"- `{key}`: {value}")
     lines += ["", "## Flags", ""]
     for key, value in sorted(summary["flag_counts"].items()):
         lines.append(f"- `{key}`: {value}")
@@ -258,6 +373,12 @@ def write_replay_log(log_dir: Path | None, case: dict, output: str):
     log_path = log_dir / f"{case['extension']}-{fid_label}-{case['hash']}.log"
     log_path.write_text(output)
     return str(log_path)
+
+
+def bucket_name(case: dict):
+    if case.get("input_kind") == "sequence":
+        return f"sequence:{case.get('sequence_name', 'unnamed')}:{case['status']}"
+    return f"{case['extension']}:{case['fid']:x}:{case['status']}"
 
 
 def run_helper_input(helper_cmd, target: Path, injector: Path, input_path: Path, timeout_secs: int, smp: int):
@@ -305,6 +426,63 @@ def run_helper_input(helper_cmd, target: Path, injector: Path, input_path: Path,
     }
 
 
+def extract_json_document(output: str):
+    output = output.strip()
+    if not output:
+        return None
+    start = output.find("{")
+    end = output.rfind("}")
+    if start < 0 or end < start:
+        return None
+    try:
+        return json.loads(output[start : end + 1])
+    except json.JSONDecodeError:
+        return None
+
+
+def run_helper_sequence(helper_cmd, input_path: Path, target_kind: str, timeout_secs: int):
+    env = os.environ.copy()
+    env.setdefault("LLVM_CONFIG_PATH", "/usr/bin/llvm-config-18")
+    env.setdefault("CC", "clang-18")
+    env.setdefault("CXX", "clang++-18")
+    env.setdefault("LIBCLANG_PATH", "/usr/lib/llvm-18/lib")
+    cmd = helper_cmd + [
+        "run-sequence",
+        "--target-kind",
+        target_kind,
+        str(input_path),
+    ]
+    try:
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=timeout_secs + 30,
+        )
+        output = proc.stdout + proc.stderr
+        payload = extract_json_document(proc.stdout) or extract_json_document(output)
+        actual_kind = payload.get("classification", "Unknown") if payload else "Unknown"
+        timed_out = False
+        returncode = proc.returncode
+    except subprocess.TimeoutExpired as exc:
+        stdout = exc.stdout.decode() if isinstance(exc.stdout, bytes) else (exc.stdout or "")
+        stderr = exc.stderr.decode() if isinstance(exc.stderr, bytes) else (exc.stderr or "")
+        output = stdout + stderr
+        payload = extract_json_document(output)
+        actual_kind = "TimeoutExpired"
+        timed_out = True
+        returncode = None
+
+    return {
+        "output": output,
+        "actual_kind": actual_kind,
+        "timed_out": timed_out,
+        "returncode": returncode,
+        "payload": payload,
+    }
+
+
 def build_replay_result(case: dict, input_path: Path, used_raw_exec: bool, run_result: dict, log_dir: Path | None):
     classification = classify_output(
         run_result["output"],
@@ -324,6 +502,7 @@ def build_replay_result(case: dict, input_path: Path, used_raw_exec: bool, run_r
 
     return {
         "input": str(input_path),
+        "input_kind": case.get("input_kind", "legacy_call"),
         "used_raw_exec": used_raw_exec,
         "expected": case["expected"],
         "actual": run_result["actual_kind"],
@@ -340,6 +519,44 @@ def build_replay_result(case: dict, input_path: Path, used_raw_exec: bool, run_r
         "classification": classification["classification"],
         "signature": classification["signature"],
         "interesting": classification["interesting"],
+        "impl_kind": None,
+        "supported_by_target": None,
+        "state_signature": None,
+        "memory_signature": None,
+        "semantic_signature": None,
+        "log_path": write_replay_log(log_dir, case, run_result["output"]),
+        "output_excerpt": run_result["output"][-4000:],
+    }
+
+
+def build_sequence_replay_result(case: dict, input_path: Path, run_result: dict, log_dir: Path | None):
+    payload = run_result.get("payload") or {}
+    return {
+        "input": str(input_path),
+        "input_kind": "sequence",
+        "used_raw_exec": False,
+        "expected": case["expected"],
+        "actual": run_result["actual_kind"],
+        "match": run_result["actual_kind"] == case["expected"],
+        "returncode": run_result["returncode"],
+        "hash": case["hash"],
+        "extension": case["extension"],
+        "eid": f"0x{case['eid']:X}",
+        "fid": f"0x{case['fid']:X}",
+        "timed_out": run_result["timed_out"],
+        "signals": [],
+        "trap": None,
+        "notes": [],
+        "classification": payload.get("classification", run_result["actual_kind"]),
+        "signature": payload.get("signature", run_result["actual_kind"]),
+        "interesting": bool(payload.get("interesting", run_result["actual_kind"] != "ok")),
+        "impl_kind": payload.get("impl_kind"),
+        "supported_by_target": payload.get("supported_by_target"),
+        "state_signature": payload.get("state_signature"),
+        "memory_signature": payload.get("memory_signature"),
+        "semantic_signature": payload.get("semantic_signature"),
+        "step_count": payload.get("step_count"),
+        "step_classifications": [step.get("classification") for step in payload.get("steps", [])],
         "log_path": write_replay_log(log_dir, case, run_result["output"]),
         "output_excerpt": run_result["output"][-4000:],
     }
@@ -364,6 +581,18 @@ def replay_case(
         run_result,
         log_dir,
     )
+
+
+def replay_sequence_case(
+    case: dict,
+    target_kind: str,
+    helper_cmd,
+    timeout_secs: int,
+    log_dir: Path | None,
+):
+    input_path = case["sequence"]
+    run_result = run_helper_sequence(helper_cmd, input_path, target_kind, timeout_secs)
+    return build_sequence_replay_result(case, input_path, run_result, log_dir)
 
 
 def replay_result_entry(
@@ -444,6 +673,9 @@ def summarize_bug_report(results, hang_stability=None, hang_minimize=None):
             "classification": rep.get("classification"),
             "signature": bucket_signature(rep),
             "raw_signature": rep.get("signature"),
+            "impl_kind": rep.get("impl_kind"),
+            "input_kind": rep.get("input_kind"),
+            "supported_by_target": rep.get("supported_by_target"),
             "signals": rep.get("signals", []),
             "actual": rep.get("actual"),
             "expected": rep.get("expected"),
@@ -455,6 +687,9 @@ def summarize_bug_report(results, hang_stability=None, hang_minimize=None):
             "trap": rep.get("trap"),
             "notes": rep.get("notes", []),
             "log_path": rep.get("log_path"),
+            "state_signature": rep.get("state_signature"),
+            "memory_signature": rep.get("memory_signature"),
+            "semantic_signature": rep.get("semantic_signature"),
             "output_excerpt": rep.get("output_excerpt", "")[-1200:],
         }
         stability = hang_stability_entry(rep)
@@ -559,12 +794,14 @@ def write_bug_markdown(summary, output: Path, label: str):
                 f"{hang_minimize.get('output', 'none')}"
             )
         semantic_text = (
-            hang_minimize.get("semantic_signature", "none")
+            hang_minimize.get("semantic_signature", bucket.get("semantic_signature", "none"))
             if hang_minimize
-            else "none"
+            else bucket.get("semantic_signature", "none")
         )
+        state_text = bucket.get("state_signature") or "none"
+        memory_text = bucket.get("memory_signature") or "none"
         lines.append(
-            f"- `{key}` x{bucket['count']} -> `{bucket['input']}` | actual={bucket['actual']} expected={bucket['expected']} | signals={','.join(bucket['signals']) or 'none'} | trap={trap_text} | stability={stability_text} | semantic={semantic_text} | minimized={minimize_text} | log={log_path}"
+            f"- `{key}` x{bucket['count']} -> `{bucket['input']}` | kind={bucket.get('input_kind', 'legacy_call')} impl={bucket.get('impl_kind') or 'none'} actual={bucket['actual']} expected={bucket['expected']} | signals={','.join(bucket['signals']) or 'none'} | trap={trap_text} | state={state_text} | memory={memory_text} | stability={stability_text} | semantic={semantic_text} | minimized={minimize_text} | log={log_path}"
         )
     output.write_text("\n".join(lines) + "\n")
 
@@ -577,7 +814,7 @@ def triage_cli(default_label: str = "SBI") -> int:
     parser.add_argument("--label", default=default_label, help="Label used in Markdown headings")
     args = parser.parse_args()
 
-    cases = [load_case(path) for path in sorted(args.result_dir.glob("*.toml"))]
+    cases = collect_cases(args.result_dir)
     summary = summarize_triage(cases)
     encoded = json.dumps(summary, indent=2, sort_keys=True) + "\n"
     if args.json_out:
@@ -605,7 +842,7 @@ def replay_cli(default_label: str = "SBI") -> int:
     parser.add_argument("--label", default=default_label, help="Reserved label for downstream tooling")
     args = parser.parse_args()
 
-    cases = [load_case(path) for path in sorted(args.result_dir.glob("*.toml"))]
+    cases = collect_cases(args.result_dir)
     if not args.all:
         cases = cases[: args.limit]
 
@@ -625,6 +862,69 @@ def replay_cli(default_label: str = "SBI") -> int:
     ]
     summary = {
         "label": args.label,
+        "result_dir": str(args.result_dir),
+        "total": len(results),
+        "matching": sum(1 for item in results if item["match"]),
+        "interesting": sum(1 for item in results if item["interesting"]),
+        "by_actual": dict(Counter(item["actual"] for item in results)),
+        "by_classification": dict(Counter(item["classification"] for item in results)),
+        "results": results,
+    }
+    encoded = json.dumps(summary, indent=2, sort_keys=True) + "\n"
+    if args.json_out:
+        args.json_out.write_text(encoded)
+    print(encoded, end="")
+    return 0
+
+
+def triage_sequence_cli(default_label: str = "SBI Sequence") -> int:
+    parser = argparse.ArgumentParser(description="Triage sequence result directories")
+    parser.add_argument("result_dir", type=Path, help="Result directory containing *.seq inputs")
+    parser.add_argument("--json-out", type=Path, help="Optional JSON summary path")
+    parser.add_argument("--md-out", type=Path, help="Optional Markdown summary path")
+    parser.add_argument("--label", default=default_label, help="Label used in Markdown headings")
+    args = parser.parse_args()
+
+    cases = [load_sequence_case(path) for path in sorted(args.result_dir.glob("*.seq"))]
+    summary = summarize_triage(cases)
+    encoded = json.dumps(summary, indent=2, sort_keys=True) + "\n"
+    if args.json_out:
+        args.json_out.write_text(encoded)
+    if args.md_out:
+        write_triage_markdown(summary, args.md_out, args.label)
+    print(encoded, end="")
+    return 0
+
+
+def replay_sequence_cli(default_label: str = "SBI Sequence") -> int:
+    parser = argparse.ArgumentParser(description="Replay sequence directories using helper run-sequence")
+    parser.add_argument("target_kind", choices=["opensbi", "rustsbi"])
+    parser.add_argument("result_dir", type=Path)
+    parser.add_argument("--limit", type=int, default=8)
+    parser.add_argument("--all", action="store_true", help="Replay all sequence inputs in the result directory")
+    parser.add_argument("--json-out", type=Path)
+    parser.add_argument("--helper-bin", help="Path to a prebuilt helper binary")
+    parser.add_argument("--timeout-secs", type=int, default=20)
+    parser.add_argument("--log-dir", type=Path, help="Optional directory to store full replay logs")
+    parser.add_argument("--label", default=default_label, help="Label used by downstream tooling")
+    args = parser.parse_args()
+
+    cases = [
+        case
+        for case in (load_sequence_case(path) for path in sorted(args.result_dir.glob("*.seq")))
+        if sequence_target_matches(case, args.target_kind)
+    ]
+    if not args.all:
+        cases = cases[: args.limit]
+
+    helper_cmd = resolve_helper_cmd(args.helper_bin)
+    results = [
+        replay_sequence_case(case, args.target_kind, helper_cmd, args.timeout_secs, args.log_dir)
+        for case in cases
+    ]
+    summary = {
+        "label": args.label,
+        "target_kind": args.target_kind,
         "result_dir": str(args.result_dir),
         "total": len(results),
         "matching": sum(1 for item in results if item["match"]),

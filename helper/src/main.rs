@@ -16,6 +16,7 @@ mod minimizer;
 mod runner;
 mod scenario_generator;
 mod seed_generator;
+mod sequence_runner;
 
 /// Main CLI structure that defines the top-level command interface
 #[derive(Parser)]
@@ -36,10 +37,16 @@ enum Commands {
     GenerateHostSeeds(GenerateHostSeeds),
     /// Generate RustSBI-oriented multi-call exec seeds
     GenerateRustsbiScenarios(GenerateRustsbiScenarios),
+    /// Generate sequence seeds for OpenSBI, RustSBI, or both
+    GenerateSequenceSeeds(GenerateSequenceSeeds),
     /// Print the current exec call registry
     ListCalls,
     /// Encode a TOML input into syzkaller-style exec bytes
     EncodeExecInput(ParseBinaryInput),
+    /// Encode a sequence JSON file into a `.seq` binary
+    EncodeSequence(SequenceInput),
+    /// Print a human-readable description of a `.seq` sequence
+    DescribeSequence(ParseBinaryInput),
     /// Print shared-memory coverage buffer information from the injector ELF
     CoverageInfo(CoverageInfo),
     /// Execute one input and export shared-memory coverage artifacts
@@ -51,6 +58,8 @@ enum Commands {
     ImportLinuxCorpus(ImportLinuxCorpus),
     /// Minimize a stable-hang `.exec` into a shorter reproducer
     MinimizeHang(MinimizeHang),
+    /// Import an `.exec` or `.toml` input into sequence format
+    ImportExecAsSequence(SequenceInput),
     /// Run the SBI firmware using the given input
     Run(RunArgs),
     /// Internal worker subcommand used by `run --timeout-ms`
@@ -60,6 +69,10 @@ enum Commands {
     Debug(RunArgs),
     /// Run one host-side layered harness input
     RunHostHarness(RunHostHarness),
+    /// Run one sequence input against a host-harness backend
+    RunSequence(RunSequence),
+    /// Run one sequence input against both host-harness backends and diff the result
+    DiffSequence(DiffSequence),
     /// Instrument SBI firmware source code with KASAN (support OpenSBI)
     InstrumentKasan(InstrumentKasan),
     /// Parse the input from a binary file
@@ -107,6 +120,23 @@ struct GenerateRustsbiScenarios {
     output: PathBuf,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+enum SequenceImplCli {
+    Opensbi,
+    Rustsbi,
+    Both,
+}
+
+#[derive(Args)]
+struct GenerateSequenceSeeds {
+    /// Generate seeds for a specific implementation or for both
+    #[arg(long, value_enum, default_value = "both")]
+    target_kind: SequenceImplCli,
+
+    /// Output directory for generated `.seq` seeds
+    output: PathBuf,
+}
+
 /// Arguments for Linux corpus import
 #[derive(Args)]
 struct ImportLinuxCorpus {
@@ -122,6 +152,16 @@ struct ImportLinuxCorpus {
 struct CoverageInfo {
     /// Path to the injector ELF
     injector: PathBuf,
+}
+
+#[derive(Args)]
+struct SequenceInput {
+    /// Input file
+    input: PathBuf,
+
+    /// Optional output path
+    #[arg(long)]
+    output: Option<PathBuf>,
 }
 
 /// Arguments for both Run and Debug commands
@@ -148,6 +188,30 @@ struct RunArgs {
 #[derive(Args)]
 struct RunHostHarness {
     /// Host harness input file (`.host` or JSON)
+    input: PathBuf,
+
+    /// Optional JSON summary output path
+    #[arg(long)]
+    json_out: Option<PathBuf>,
+}
+
+#[derive(Args)]
+struct RunSequence {
+    /// Sequence input file (`.seq` or JSON)
+    input: PathBuf,
+
+    /// Backend implementation to execute
+    #[arg(long, value_enum)]
+    target_kind: Option<HostTargetCli>,
+
+    /// Optional JSON summary output path
+    #[arg(long)]
+    json_out: Option<PathBuf>,
+}
+
+#[derive(Args)]
+struct DiffSequence {
+    /// Sequence input file (`.seq` or JSON)
     input: PathBuf,
 
     /// Optional JSON summary output path
@@ -251,11 +315,38 @@ fn main() {
         Commands::GenerateRustsbiScenarios(args) => {
             scenario_generator::generate_rustsbi_scenarios(args.output);
         }
+        Commands::GenerateSequenceSeeds(args) => {
+            let (include_opensbi, include_rustsbi) = match args.target_kind {
+                SequenceImplCli::Opensbi => (true, false),
+                SequenceImplCli::Rustsbi => (false, true),
+                SequenceImplCli::Both => (true, true),
+            };
+            if let Err(err) = sequence_runner::generate_sequence_seeds(
+                args.output,
+                include_opensbi,
+                include_rustsbi,
+            ) {
+                eprintln!("generate-sequence-seeds failed: {err}");
+                std::process::exit(1);
+            }
+        }
         Commands::ListCalls => {
             list_calls();
         }
         Commands::EncodeExecInput(args) => {
             encode_exec_input(args.input);
+        }
+        Commands::EncodeSequence(args) => {
+            if let Err(err) = sequence_runner::encode_sequence(args.input, args.output) {
+                eprintln!("encode-sequence failed: {err}");
+                std::process::exit(1);
+            }
+        }
+        Commands::DescribeSequence(args) => {
+            if let Err(err) = sequence_runner::describe_sequence(args.input) {
+                eprintln!("describe-sequence failed: {err}");
+                std::process::exit(1);
+            }
         }
         Commands::CoverageInfo(args) => {
             coverage::print_shared_coverage_info(args.injector);
@@ -292,6 +383,12 @@ fn main() {
                 std::process::exit(1);
             }
         }
+        Commands::ImportExecAsSequence(args) => {
+            if let Err(err) = sequence_runner::import_exec_as_sequence(args.input, args.output) {
+                eprintln!("import-exec-as-sequence failed: {err}");
+                std::process::exit(1);
+            }
+        }
         Commands::Run(args) => {
             run_with_optional_timeout(args);
         }
@@ -304,6 +401,24 @@ fn main() {
         }
         Commands::RunHostHarness(args) => {
             run_host_harness(args.input, args.json_out);
+        }
+        Commands::RunSequence(args) => {
+            let target_kind = match args.target_kind {
+                Some(HostTargetCli::Opensbi) => HostTargetKind::OpenSbi,
+                Some(HostTargetCli::Rustsbi) => HostTargetKind::RustSbi,
+                None => load_sequence_target_hint(&args.input).unwrap_or(HostTargetKind::OpenSbi),
+            };
+            if let Err(err) = sequence_runner::run_sequence(args.input, target_kind, args.json_out)
+            {
+                eprintln!("run-sequence failed: {err}");
+                std::process::exit(1);
+            }
+        }
+        Commands::DiffSequence(args) => {
+            if let Err(err) = sequence_runner::diff_sequence(args.input, args.json_out) {
+                eprintln!("diff-sequence failed: {err}");
+                std::process::exit(1);
+            }
         }
         Commands::InstrumentKasan(args) => {
             // Instrument the target source code with KASAN
@@ -432,6 +547,24 @@ fn parse_binary_input(input: PathBuf) {
     // Read the binary input file
     let binary = fs::read(&input).expect("read input file");
 
+    if let Ok(program) = sequence_program_from_bytes(&binary) {
+        let hash = program.hash_string();
+        let description_path = PathBuf::from(".").join(format!("sequence-program-{hash}.txt"));
+        let json_path = PathBuf::from(".").join(format!("sequence-program-{hash}.json"));
+        fs::write(&description_path, sequence_program_describe(&program))
+            .expect(format!("write description file: {:?}", &description_path).as_str());
+        fs::write(
+            &json_path,
+            format!(
+                "{}\n",
+                serde_json::to_string_pretty(&program).expect("serialize sequence json")
+            ),
+        )
+        .expect(format!("write sequence json: {:?}", &json_path).as_str());
+        println!("Wrote {:?} and {:?}", description_path, json_path);
+        return;
+    }
+
     if let Ok(program) = exec_program_from_bytes(&binary) {
         let hash = format!("{:08x}", fxhash(&binary));
         let description_path = PathBuf::from(".").join(format!("exec-program-{hash}.txt"));
@@ -483,6 +616,18 @@ fn encode_exec_input(input: PathBuf) {
     let output_path = PathBuf::from(".").join(format!("{}.exec", input.hash_string()));
     fs::write(&output_path, binary).expect(format!("write exec file: {:?}", &output_path).as_str());
     println!("Wrote {:?}", output_path);
+}
+
+fn load_sequence_target_hint(path: &PathBuf) -> Option<HostTargetKind> {
+    let raw = fs::read(path).ok()?;
+    if raw.starts_with(SEQUENCE_MAGIC) {
+        return sequence_program_from_bytes(&raw).ok()?.env.impl_hint;
+    }
+    let text = String::from_utf8(raw).ok()?;
+    serde_json::from_str::<SequenceProgram>(&text)
+        .ok()?
+        .env
+        .impl_hint
 }
 
 fn fxhash(bytes: &[u8]) -> u32 {

@@ -6,7 +6,7 @@ edition = "2024"
 [dependencies]
 common = { path = "../common" }
 serde = { version = "1.0.218", features = ["derive"] }
-rustsbi = { path = "../playground/rustsbi-fuzz/output/rustsbi/library/rustsbi", default-features = false }
+rustsbi = { version = "0.4.0", default-features = false }
 
 [build-dependencies]
 cc = "1.2.16"

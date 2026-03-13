@@ -2,9 +2,17 @@ use std::env;
 use std::path::{Path, PathBuf};
 
 fn opensbi_root(manifest_dir: &Path) -> PathBuf {
+    if let Ok(explicit) = env::var("SBIFUZZ_OPENSBI_ROOT") {
+        let candidate = PathBuf::from(explicit);
+        if candidate.is_dir() {
+            return candidate;
+        }
+    }
+
     let candidates = [
         manifest_dir.join("../playground/opensbi-fuzz/output/opensbi"),
         manifest_dir.join("../playground/opensbi-sanitizer-demo/output/opensbi"),
+        PathBuf::from("/home/plucky/opensbi"),
     ];
 
     for candidate in candidates {
@@ -14,11 +22,12 @@ fn opensbi_root(manifest_dir: &Path) -> PathBuf {
     }
 
     panic!(
-        "OpenSBI source tree not found under playground outputs; run `make -C playground/opensbi-fuzz prepare` first"
+        "OpenSBI source tree not found; set SBIFUZZ_OPENSBI_ROOT or run `make -C playground/opensbi-fuzz prepare` first"
     );
 }
 
 fn main() {
+    println!("cargo:rerun-if-env-changed=SBIFUZZ_OPENSBI_ROOT");
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("manifest dir"));
     let opensbi = opensbi_root(&manifest_dir);
     let native_dir = manifest_dir.join("src/native");

@@ -1,14 +1,17 @@
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use sha2::{Digest, Sha256};
 use std::num::ParseIntError;
+use std::path::Path;
 
 mod coverage;
 mod exec;
 mod host;
+mod sequence;
 
 pub use coverage::*;
 pub use exec::*;
 pub use host::*;
+pub use sequence::*;
 
 /// Represents the complete input data structure for SBI calls
 /// Contains both metadata and arguments
@@ -318,6 +321,59 @@ pub fn get_extension_name(eid: u64) -> String {
         0x44425452 => "dbtr".to_string(),
         0x4D505859 => "mpxy".to_string(),
         _ => "unknown".to_string(),
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TargetArtifactMode {
+    Generic,
+    RustSbiPrototyperDynamic,
+    RustSbiPrototyperJump,
+    RustSbiPrototyperPayload,
+    RustSbiPrototyperOpaque,
+}
+
+pub fn detect_target_artifact_mode(path: &Path) -> TargetArtifactMode {
+    let Some(file_name) = path.file_name().and_then(|value| value.to_str()) else {
+        return TargetArtifactMode::Generic;
+    };
+
+    if !file_name.starts_with("rustsbi-prototyper") {
+        return TargetArtifactMode::Generic;
+    }
+    if file_name.contains("-dynamic.")
+        || file_name.ends_with("-dynamic.bin")
+        || file_name.ends_with("-dynamic.elf")
+    {
+        return TargetArtifactMode::RustSbiPrototyperDynamic;
+    }
+    if file_name.contains("-jump.")
+        || file_name.ends_with("-jump.bin")
+        || file_name.ends_with("-jump.elf")
+    {
+        return TargetArtifactMode::RustSbiPrototyperJump;
+    }
+    if file_name.contains("-payload-") || file_name.contains("-payload.") {
+        return TargetArtifactMode::RustSbiPrototyperPayload;
+    }
+    TargetArtifactMode::RustSbiPrototyperOpaque
+}
+
+pub fn validate_target_supports_external_kernel_payload(path: &Path) -> Result<(), String> {
+    match detect_target_artifact_mode(path) {
+        TargetArtifactMode::Generic | TargetArtifactMode::RustSbiPrototyperDynamic => Ok(()),
+        TargetArtifactMode::RustSbiPrototyperJump => Err(format!(
+            "target artifact '{}' is RustSBI jump mode and does not support external injector payloads; use rustsbi-prototyper-dynamic.bin instead",
+            path.display()
+        )),
+        TargetArtifactMode::RustSbiPrototyperPayload => Err(format!(
+            "target artifact '{}' embeds its own payload and does not support external injector payloads; use rustsbi-prototyper-dynamic.bin instead",
+            path.display()
+        )),
+        TargetArtifactMode::RustSbiPrototyperOpaque => Err(format!(
+            "target artifact '{}' is an ambiguous RustSBI prototyper build; use rustsbi-prototyper-dynamic.bin for fuzz/replay/injector workflows",
+            path.display()
+        )),
     }
 }
 
@@ -677,4 +733,56 @@ pub fn parse_u64(s: &str) -> Result<u64, String> {
             .map_err(|_| format!("invalid decimal eid: {}", s))?
     };
     Ok(res)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn target_mode_detection_distinguishes_rustsbi_variants() {
+        assert_eq!(
+            detect_target_artifact_mode(Path::new("rustsbi-prototyper-dynamic.bin")),
+            TargetArtifactMode::RustSbiPrototyperDynamic
+        );
+        assert_eq!(
+            detect_target_artifact_mode(Path::new("rustsbi-prototyper-jump.bin")),
+            TargetArtifactMode::RustSbiPrototyperJump
+        );
+        assert_eq!(
+            detect_target_artifact_mode(Path::new("rustsbi-prototyper-payload-test.bin")),
+            TargetArtifactMode::RustSbiPrototyperPayload
+        );
+        assert_eq!(
+            detect_target_artifact_mode(Path::new("rustsbi-prototyper.bin")),
+            TargetArtifactMode::RustSbiPrototyperOpaque
+        );
+        assert_eq!(
+            detect_target_artifact_mode(Path::new("fw_dynamic.bin")),
+            TargetArtifactMode::Generic
+        );
+    }
+
+    #[test]
+    fn external_kernel_validation_rejects_wrong_rustsbi_artifacts() {
+        assert!(
+            validate_target_supports_external_kernel_payload(Path::new(
+                "rustsbi-prototyper-dynamic.bin"
+            ))
+            .is_ok()
+        );
+        assert!(
+            validate_target_supports_external_kernel_payload(Path::new("fw_dynamic.bin")).is_ok()
+        );
+        assert!(
+            validate_target_supports_external_kernel_payload(Path::new("rustsbi-prototyper.bin"))
+                .is_err()
+        );
+        assert!(
+            validate_target_supports_external_kernel_payload(Path::new(
+                "rustsbi-prototyper-jump.bin"
+            ))
+            .is_err()
+        );
+    }
 }
