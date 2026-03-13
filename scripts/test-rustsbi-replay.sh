@@ -6,7 +6,7 @@ out_dir="$(mktemp -d)"
 trap 'rm -rf "$out_dir"' EXIT
 
 helper_bin="$repo_root/target/debug/helper"
-target_bin="$repo_root/playground/rustsbi-fuzz/output/rustsbi/target/riscv64imac-unknown-none-elf/release/rustsbi-prototyper.bin"
+target_bin="$repo_root/playground/rustsbi-fuzz/output/rustsbi/target/riscv64imac-unknown-none-elf/release/rustsbi-prototyper-dynamic.bin"
 injector_elf="$repo_root/injector/build/injector.elf"
 seed_exec="$repo_root/playground/rustsbi-fuzz/output/seed-complex/hsm-start-status-chain.exec"
 case_hash="deadbeef"

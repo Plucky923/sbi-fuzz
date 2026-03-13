@@ -55,6 +55,12 @@ struct CoverageRunReport {
     oracle_failure: Option<String>,
 }
 
+enum StartupAction {
+    ReachedBreakpoint,
+    FinishWith(ExitKind),
+    TerminateProcess,
+}
+
 pub fn emit_timeout_coverage_report(
     target: &PathBuf,
     injector: &PathBuf,
@@ -79,8 +85,16 @@ pub fn emit_timeout_coverage_report(
     println!("{json}");
 }
 
+fn ensure_target_contract(target: &PathBuf) {
+    if let Err(err) = validate_target_supports_external_kernel_payload(target) {
+        eprintln!("Target artifact contract mismatch: {err}");
+        process::exit(2);
+    }
+}
+
 /// Execute a single test case in the QEMU emulator.
 pub fn run(target: PathBuf, injector: PathBuf, input: PathBuf, smp: u16) {
+    ensure_target_contract(&target);
     let outcome = execute(&target, &injector, &input, smp, true, 8);
     if let Some(snapshot) = outcome.coverage_snapshot.as_ref() {
         print_coverage_summary(&target, snapshot, &outcome.symbolized);
@@ -102,6 +116,7 @@ pub fn collect_coverage(
     json_out: Option<PathBuf>,
     symbolize_limit: usize,
 ) {
+    ensure_target_contract(&target);
     let outcome = execute(&target, &injector, &input, smp, false, symbolize_limit);
 
     if let Some(raw_out) = raw_out {
@@ -123,6 +138,7 @@ pub fn collect_coverage(
 const TEMP_INPUT_BINARY: &str = "/tmp/sbifuzz_input.bin";
 
 pub fn debug(target: PathBuf, injector: PathBuf, input: PathBuf, smp: u16) {
+    ensure_target_contract(&target);
     let input_binary = match load_wire_input(&input) {
         Ok(bytes) => bytes,
         Err(err) => {
@@ -277,9 +293,24 @@ fn execute(
     let qemu = emulator.qemu();
     qemu.set_breakpoint(main_addr);
     unsafe {
-        match qemu.run() {
-            Ok(QemuExitReason::Breakpoint(_)) => {}
-            _ => panic!("Unexpected QEMU exit."),
+        match classify_startup_exit(qemu.run()) {
+            StartupAction::ReachedBreakpoint => {}
+            StartupAction::TerminateProcess => process::exit(0),
+            StartupAction::FinishWith(exit_kind) => {
+                if serial_stdio {
+                    eprintln!(
+                        "QEMU exited before reaching main breakpoint. Treating run as {}.",
+                        exit_kind_name(&exit_kind)
+                    );
+                }
+                return RunOutcome {
+                    exit_kind,
+                    coverage_snapshot: None,
+                    oracle_snapshot: None,
+                    symbolized: Vec::new(),
+                    fallback_to_qemu_edges: true,
+                };
+            }
         }
     }
     qemu.remove_breakpoint(main_addr);
@@ -473,6 +504,33 @@ fn exit_kind_name(kind: &ExitKind) -> String {
     format!("{kind:?}")
 }
 
+fn classify_startup_exit(result: Result<QemuExitReason, QemuExitError>) -> StartupAction {
+    match result {
+        Ok(QemuExitReason::Breakpoint(_)) => StartupAction::ReachedBreakpoint,
+        Ok(QemuExitReason::End(QemuShutdownCause::HostSignal(signal))) => {
+            signal.handle();
+            StartupAction::TerminateProcess
+        }
+        Ok(QemuExitReason::Timeout)
+        | Ok(QemuExitReason::End(QemuShutdownCause::GuestShutdown))
+        | Ok(QemuExitReason::End(QemuShutdownCause::GuestReset))
+        | Ok(QemuExitReason::End(QemuShutdownCause::SubsystemReset))
+        | Ok(QemuExitReason::End(QemuShutdownCause::HostQmpSystemReset))
+        | Ok(QemuExitReason::End(QemuShutdownCause::SnapshotLoad)) => {
+            StartupAction::FinishWith(ExitKind::Timeout)
+        }
+        Err(QemuExitError::UnexpectedExit)
+        | Ok(QemuExitReason::End(QemuShutdownCause::GuestPanic))
+        | Ok(QemuExitReason::End(QemuShutdownCause::HostError))
+        | Ok(QemuExitReason::End(QemuShutdownCause::HostQmpQuit))
+        | Ok(QemuExitReason::End(QemuShutdownCause::HostUi))
+        | Ok(QemuExitReason::End(QemuShutdownCause::None)) => {
+            StartupAction::FinishWith(ExitKind::Crash)
+        }
+        _ => StartupAction::FinishWith(ExitKind::Crash),
+    }
+}
+
 fn load_wire_input(input: &PathBuf) -> Result<Vec<u8>, String> {
     if input.extension().and_then(|ext| ext.to_str()) == Some("toml") {
         let toml_content = fs::read_to_string(input).map_err(|err| err.to_string())?;
@@ -482,6 +540,11 @@ fn load_wire_input(input: &PathBuf) -> Result<Vec<u8>, String> {
     }
 
     let bytes = fs::read(input).map_err(|err| err.to_string())?;
+    if bytes.starts_with(SEQUENCE_MAGIC) {
+        let sequence = sequence_program_from_bytes(&bytes)?;
+        let program = sequence_program_to_exec(&sequence)?;
+        return Ok(exec_program_to_bytes(&program));
+    }
     if bytes.starts_with(EXEC_MAGIC) {
         exec_program_from_bytes(&bytes)?;
     }

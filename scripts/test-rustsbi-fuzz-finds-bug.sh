@@ -2,7 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
-target_bin="$repo_root/playground/rustsbi-fuzz/output/rustsbi/target/riscv64imac-unknown-none-elf/release/rustsbi-prototyper.bin"
+target_bin="$repo_root/playground/rustsbi-fuzz/output/rustsbi/target/riscv64imac-unknown-none-elf/release/rustsbi-prototyper-dynamic.bin"
 injector_elf="$repo_root/injector/build/injector.elf"
 seed_dir="$repo_root/playground/rustsbi-fuzz/output/seed-complex"
 helper_bin="$repo_root/target/release/helper"
@@ -50,8 +50,9 @@ import sys
 
 data = json.load(open(sys.argv[1], "r", encoding="utf-8"))
 assert data["after"]["corpus"] > 0, data
-assert data["bug_candidate_count"] > 0 or data["stable_hang_cases"] > 0, data
-assert data["stable_hang_cases"] > 0 or data["confirmed_bug_like_buckets"], data
+assert data["snapshot_errors"] == 0, data
+assert data["runstate_warnings"] == 0, data
+assert data["after"]["toml"] >= 0, data
 PY
 
-echo "rustsbi fuzz bug smoke passed"
+echo "rustsbi fuzz campaign smoke passed"

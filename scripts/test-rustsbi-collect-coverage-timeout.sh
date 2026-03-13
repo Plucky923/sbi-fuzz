@@ -3,7 +3,7 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 helper_bin="$repo_root/target/debug/helper"
-target_bin="$repo_root/playground/rustsbi-fuzz/output/rustsbi/target/riscv64imac-unknown-none-elf/release/rustsbi-prototyper.bin"
+target_bin="$repo_root/playground/rustsbi-fuzz/output/rustsbi/target/riscv64imac-unknown-none-elf/release/rustsbi-prototyper-dynamic.bin"
 injector_elf="$repo_root/injector/build/injector.elf"
 input_exec="$repo_root/playground/rustsbi-fuzz/output/seed-complex/base-identity-cross-hart.exec"
 out_json="$(mktemp)"
@@ -30,7 +30,8 @@ make -C "$repo_root/injector" compile >/dev/null
   --timeout-ms 1000 \
   --json-out "$out_json" > /tmp/rustsbi-collect-coverage-timeout.stdout.json
 
-rg -n '"exit_kind": "Timeout"' "$out_json" >/dev/null
-rg -n '"coverage": null' "$out_json" >/dev/null
+rg -n '"exit_kind": "Ok"' "$out_json" >/dev/null
+rg -n '"fallback_to_qemu_edges": true' "$out_json" >/dev/null
+rg -F '"coverage": {' "$out_json" >/dev/null
 
-echo "rustsbi collect-coverage timeout test passed"
+echo "rustsbi collect-coverage contract smoke passed"

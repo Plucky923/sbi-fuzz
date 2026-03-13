@@ -7,8 +7,8 @@ use libafl::{
     corpus::{Corpus, CorpusId, InMemoryOnDiskCorpus, OnDiskCorpus, Testcase},
     events::{EventConfig, launcher::Launcher, std_maybe_report_progress, std_report_progress},
     executors::ExitKind,
-    feedback_or, feedback_or_fast,
-    feedbacks::{CrashFeedback, MaxMapFeedback, TimeFeedback, TimeoutFeedback},
+    feedback_or,
+    feedbacks::{CrashFeedback, MaxMapFeedback, TimeFeedback},
     fuzzer::{Fuzzer, StdFuzzer},
     generators::{Generator, RandBytesGenerator},
     inputs::{HasTargetBytes, Input, ResizableMutator},
@@ -23,34 +23,27 @@ use libafl::{
 use libafl_bolts::{
     AsSlice, ClientId,
     core_affinity::Cores,
-    current_nanos, current_time, impl_serdeany,
-    generic_hash_std,
+    current_nanos, current_time, generic_hash_std, impl_serdeany,
     ownedref::OwnedMutSlice,
     rands::StdRand,
     shmem::{ShMemProvider, StdShMemProvider},
     tuples::tuple_list,
 };
 use libafl_qemu::{
-    Emulator, QemuExitError, QemuExitReason, QemuShutdownCause, Regs,
-    elf::EasyElf,
-    executor::QemuExecutor,
-    modules::{DrCovModule, edges::StdEdgeCoverageModuleBuilder, utils::filters::StdAddressFilter},
+    Emulator, QemuExitError, QemuExitReason, QemuShutdownCause, Regs, elf::EasyElf,
+    executor::QemuExecutor, modules::edges::StdEdgeCoverageModuleBuilder,
 };
 use libafl_targets::{EDGES_MAP_DEFAULT_SIZE, MAX_EDGES_FOUND, edges_map_mut_ptr};
-use rangemap::RangeMap;
 use serde::{Deserialize, Serialize};
 use std::{
     cmp::max,
     collections::HashMap,
+    env,
     fs::{self, OpenOptions},
     io::ErrorKind,
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::{self},
 };
-
-// Define the memory range for firmware
-const FIRMWARE_ADDR_START: u64 = 0x8000_0000;
-const FIRMWARE_ADDR_END: u64 = 0x8020_0000;
 
 #[derive(Debug, Clone, Copy)]
 struct SharedCoverageConfig {
@@ -127,7 +120,7 @@ impl Input for FuzzInput {
 }
 
 impl HasTargetBytes for FuzzInput {
-    fn target_bytes(&self) -> libafl_bolts::ownedref::OwnedSlice<u8> {
+    fn target_bytes(&self) -> libafl_bolts::ownedref::OwnedSlice<'_, u8> {
         libafl_bolts::ownedref::OwnedSlice::from(self.0.as_slice())
     }
 }
@@ -190,7 +183,9 @@ where
     S: libafl::state::HasRand,
 {
     fn generate(&mut self, state: &mut S) -> Result<FuzzInput, Error> {
-        self.0.generate(state).map(|bytes| FuzzInput::new(bytes.into()))
+        self.0
+            .generate(state)
+            .map(|bytes| FuzzInput::new(bytes.into()))
     }
 }
 
@@ -215,7 +210,7 @@ pub fn fuzz(
     cores: &str,
     timeout: Duration,
     smp: u16,
-    dr_cov: Option<PathBuf>,
+    _dr_cov: Option<PathBuf>,
     monitor_csv: Option<PathBuf>,
     check_skip_fn: impl Fn(&InputData) -> bool,
 ) -> Result<(), Error> {
@@ -227,6 +222,10 @@ pub fn fuzz(
     if !objective_raw_dir.exists() {
         fs::create_dir(&objective_raw_dir).expect("create raw objective directory");
     }
+    let objective_corpus_dir = objective_dir.join(".objective-corpus");
+    if !objective_corpus_dir.exists() {
+        fs::create_dir(&objective_corpus_dir).expect("create objective corpus directory");
+    }
     let cores = Cores::from_cmdline(cores).expect("parse cores");
     let mut elf_buffer = Vec::new();
     let elf = EasyElf::from_file(&injector, &mut elf_buffer).expect("load injector elf");
@@ -235,17 +234,16 @@ pub fn fuzz(
     let input_addr = elf
         .resolve_symbol("FUZZ_INPUT", 0)
         .expect("symbol FUZZ_INPUT not found");
-    let main_addr = elf
-        .resolve_symbol("main", 0)
-        .expect("symbol main not found");
     let breakpoint = elf
         .resolve_symbol("BREAKPOINT", 0)
         .expect("symbol BREAKPOINT not found");
     let shared_coverage = resolve_shared_coverage(&elf);
     let smp = max(1, smp).to_string();
+    let enforce_structured_inputs = seed_dir.is_some();
 
     // Define the client function that will be executed for each fuzzing instance
     let mut run_client = |state: Option<_>, mut mgr, _client_description| {
+        let debug_startup = env::var("SBIFUZZ_DEBUG_STARTUP").ok().as_deref() == Some("1");
         // Configure QEMU parameters
         let qemu_config = vec![
             "fuzzer".to_string(),
@@ -283,56 +281,35 @@ pub fn fuzz(
             .track_indices()
         };
 
-        // Configure Dr. Coverage if provided
-        let mut dr_cov_path = PathBuf::from("");
-        let mut dr_cov_addr = 0..0;
-        let mut dr_cov_module_map: RangeMap<u64, (u16, String)> = RangeMap::new();
-        if dr_cov.is_some() {
-            dr_cov_path = dr_cov.clone().unwrap();
-            dr_cov_addr = FIRMWARE_ADDR_START..FIRMWARE_ADDR_END;
-            dr_cov_module_map.insert(
-                FIRMWARE_ADDR_START..FIRMWARE_ADDR_END,
-                (1, "sbi".to_string()),
-            );
-        }
-
         // Set up coverage modules
         let emulator_modules = tuple_list!(
             StdEdgeCoverageModuleBuilder::default()
-                .address_filter(StdAddressFilter::allow_list(vec![
-                    FIRMWARE_ADDR_START..FIRMWARE_ADDR_END
-                ]))
                 .map_observer(edges_observer.as_mut())
                 .build()
-                .expect("build std edge coverage module"),
-            DrCovModule::builder()
-                .filename(dr_cov_path)
-                .module_mapping(dr_cov_module_map)
-                .filter(StdAddressFilter::allow_list(vec![dr_cov_addr]))
-                .full_trace(false)
-                .build()
+                .expect("build std edge coverage module")
         );
 
         // Initialize the QEMU emulator and set breakpoints
+        if debug_startup {
+            eprintln!("[sbifuzz] startup: building emulator");
+        }
         let emulator = Emulator::empty()
             .qemu_parameters(qemu_config)
             .modules(emulator_modules)
             .build()?;
         let qemu = emulator.qemu();
-        qemu.set_breakpoint(main_addr);
-        unsafe {
-            match qemu.run() {
-                Ok(QemuExitReason::Breakpoint(_)) => {}
-                _ => panic!("Unexpected QEMU exit."),
-            }
+        qemu.set_breakpoint(breakpoint);
+        if debug_startup {
+            eprintln!("[sbifuzz] startup: snapshotting reset state");
         }
 
-        qemu.remove_breakpoint(main_addr);
-        qemu.set_breakpoint(breakpoint);
-
-        // Save initial CPU state for restoring between runs
+        // Snapshot the reset state. Each execution will boot the target from
+        // reset and run until BREAKPOINT instead of relying on a prior main breakpoint.
         let saved_cpu_state = qemu.cpu_from_index(0).save_state();
         let snap = qemu.create_fast_snapshot(true);
+        if debug_startup {
+            eprintln!("[sbifuzz] startup: snapshot ready");
+        }
 
         // Define the execution harness function
         let mut harness = |emulator: &mut Emulator<_, _, _, _, _, _, _>,
@@ -342,7 +319,26 @@ pub fn fuzz(
             let target = input.target_bytes();
             let raw = target.as_slice();
 
-            let exec_program = if raw.starts_with(EXEC_MAGIC) {
+            let sequence_program = if raw.starts_with(SEQUENCE_MAGIC) {
+                match sequence_program_from_bytes(raw) {
+                    Ok(program) => Some(program),
+                    Err(_) => return ExitKind::Ok,
+                }
+            } else {
+                None
+            };
+            if enforce_structured_inputs
+                && sequence_program.is_none()
+                && !raw.starts_with(EXEC_MAGIC)
+            {
+                return ExitKind::Ok;
+            }
+            let exec_program = if let Some(sequence) = sequence_program.as_ref() {
+                match sequence_program_to_exec(sequence) {
+                    Ok(program) => Some(program),
+                    Err(_) => return ExitKind::Ok,
+                }
+            } else if raw.starts_with(EXEC_MAGIC) {
                 match exec_program_from_bytes(raw) {
                     Ok(program) => Some(program),
                     Err(_) => return ExitKind::Ok,
@@ -350,8 +346,31 @@ pub fn fuzz(
             } else {
                 None
             };
+            if enforce_structured_inputs
+                && exec_program
+                    .as_ref()
+                    .is_some_and(|program| !exec_program_uses_high_value_calls(program))
+            {
+                return ExitKind::Ok;
+            }
 
-            let mut input = if let Some(program) = exec_program.as_ref() {
+            let mut input = if let Some(sequence) = sequence_program.as_ref() {
+                sequence_program_primary_input(sequence)
+                    .or_else(|| exec_program.as_ref().and_then(exec_program_primary_input))
+                    .unwrap_or_else(|| InputData {
+                        metadata: Metadata::from_call(0, 0, "sequence-unknown".to_string()),
+                        args: Args {
+                            eid: 0,
+                            fid: 0,
+                            arg0: 0,
+                            arg1: 0,
+                            arg2: 0,
+                            arg3: 0,
+                            arg4: 0,
+                            arg5: 0,
+                        },
+                    })
+            } else if let Some(program) = exec_program.as_ref() {
                 exec_program_primary_input(program).unwrap_or_else(|| InputData {
                     metadata: Metadata::from_call(0, 0, "exec-unknown".to_string()),
                     args: Args {
@@ -375,16 +394,9 @@ pub fn fuzz(
                 // Skip execution if user-defined function says so
                 return ExitKind::Ok;
             }
-            let semantic_objective_key =
-                objective_key_for_case(exec_program.as_ref(), &input, None);
             let st = state
                 .named_metadata::<ObjectiveCountMetadata>("objective_id_count")
                 .expect("get count");
-            if let Some(objective_key) = semantic_objective_key.as_deref() {
-                if st.get_objective_key_count(objective_key) >= 3 {
-                    return ExitKind::Ok;
-                }
-            }
             if exec_program.is_some() {
                 if st.get_eid_count(input.args.eid) >= 250 {
                     return ExitKind::Ok;
@@ -407,8 +419,12 @@ pub fn fuzz(
             }
 
             // Write input to emulator memory and execute
-            let wire_input = if exec_program.is_some() {
-                raw.to_vec()
+            let wire_input = if let Some(program) = exec_program.as_ref() {
+                if sequence_program.is_some() {
+                    exec_program_to_bytes(program)
+                } else {
+                    raw.to_vec()
+                }
             } else {
                 let program = normalize_exec_program(exec_program_from_input(&input));
                 exec_program_to_bytes(&program)
@@ -469,7 +485,29 @@ pub fn fuzz(
             }
 
             // Save interesting inputs that cause crashes or timeouts
-            if qemu_ret != ExitKind::Ok {
+            let objective_key =
+                objective_key_for_case(exec_program.as_ref(), &input, Some(&qemu_ret));
+            let should_record = {
+                let st = state
+                    .named_metadata::<ObjectiveCountMetadata>("objective_id_count")
+                    .expect("get count");
+                match qemu_ret {
+                    ExitKind::Crash => objective_key
+                        .as_deref()
+                        .map(|key| st.get_objective_key_count(key) < 3)
+                        .unwrap_or(true),
+                    ExitKind::Timeout => {
+                        timeout_case_is_high_value(exec_program.as_ref(), &input)
+                            && objective_key
+                                .as_deref()
+                                .map(|key| st.get_objective_key_count(key) == 0)
+                                .unwrap_or(false)
+                    }
+                    _ => false,
+                }
+            };
+
+            if should_record {
                 input.metadata.source = format!("fuzz-{}-{:?}", hash, qemu_ret);
                 atomic_write_file(&toml_path, input_to_toml(&input).into_bytes())
                     .expect(format!("write toml file: {:?}", &toml_path).as_str());
@@ -479,12 +517,7 @@ pub fn fuzz(
                 state
                     .named_metadata_mut::<ObjectiveCountMetadata>("objective_id_count")
                     .expect("get count")
-                    .add_count(
-                        input.args.eid,
-                        input.args.fid,
-                        objective_key_for_case(exec_program.as_ref(), &input, Some(&qemu_ret))
-                            .as_deref(),
-                    );
+                    .add_count(input.args.eid, input.args.fid, objective_key.as_deref());
             }
 
             // Restore emulator state for next run
@@ -502,7 +535,7 @@ pub fn fuzz(
             TimeFeedback::new(&time_observer),
             MaxMapFeedback::new(&edges_observer)
         );
-        let mut objective = feedback_or_fast!(CrashFeedback::new(), TimeoutFeedback::new());
+        let mut objective = CrashFeedback::new();
 
         // Initialize or use provided fuzzer state
         let mut state = state.unwrap_or_else(|| {
@@ -510,7 +543,7 @@ pub fn fuzz(
                 StdRand::with_seed(current_nanos()),
                 InMemoryOnDiskCorpus::new(objective_dir.join(".corpus"))
                     .expect("create on disk corpus"),
-                OnDiskCorpus::new(&objective_raw_dir).expect("create on disk corpus"),
+                OnDiskCorpus::new(&objective_corpus_dir).expect("create on disk corpus"),
                 &mut feedback,
                 &mut objective,
             )
@@ -667,16 +700,16 @@ fn atomic_write_file(path: &PathBuf, bytes: Vec<u8>) -> std::io::Result<()> {
 }
 
 fn list_bootstrap_paths(
-    objective_raw_dir: &PathBuf,
+    objective_raw_dir: &Path,
     seed_dir: Option<&PathBuf>,
     limit: usize,
 ) -> Vec<PathBuf> {
-    let from_dir = |dir: &PathBuf| -> Vec<PathBuf> {
+    let from_dir = |dir: &Path| -> Vec<PathBuf> {
         let mut paths: Vec<_> = fs::read_dir(dir)
             .ok()
             .into_iter()
             .flat_map(|entries| entries.flatten().map(|entry| entry.path()))
-            .filter(|path| path.is_file())
+            .filter(|path| is_bootstrap_input(path))
             .collect();
         paths.sort();
         if limit > 0 && paths.len() > limit {
@@ -685,11 +718,29 @@ fn list_bootstrap_paths(
         paths
     };
 
-    let objective_paths = from_dir(objective_raw_dir);
-    if !objective_paths.is_empty() {
-        return objective_paths;
+    if let Some(seed_dir) = seed_dir {
+        let seed_paths = from_dir(seed_dir);
+        if !seed_paths.is_empty() {
+            return seed_paths;
+        }
     }
-    seed_dir.map(from_dir).unwrap_or_default()
+    from_dir(objective_raw_dir)
+}
+
+fn is_bootstrap_input(path: &Path) -> bool {
+    if !path.is_file() {
+        return false;
+    }
+    let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
+        return false;
+    };
+    if name.starts_with('.') {
+        return false;
+    }
+    let Ok(bytes) = fs::read(path) else {
+        return false;
+    };
+    bytes.starts_with(EXEC_MAGIC) || bytes.starts_with(SEQUENCE_MAGIC)
 }
 
 fn objective_key_for_case(
@@ -699,8 +750,18 @@ fn objective_key_for_case(
 ) -> Option<String> {
     let exit_kind = exit_kind.map(|kind| format!("{kind:?}"))?;
     let body = match exec_program {
+        Some(program) if exit_kind == "Timeout" => exec_timeout_signature(program),
         Some(program) => exec_semantic_signature(program),
-        None => format!("call:{:x}-{:x}", input.args.eid, input.args.fid),
+        None if exit_kind == "Timeout" => {
+            format!(
+                "call:{}",
+                timeout_call_bucket(input.args.eid, input.args.fid)
+            )
+        }
+        None => format!(
+            "call:{}",
+            semantic_call_bucket(input.args.eid, input.args.fid)
+        ),
     };
     Some(format!("{exit_kind}|{body}"))
 }
@@ -764,23 +825,117 @@ fn exec_semantic_signature(program: &ExecProgram) -> String {
 
 fn exec_semantic_call_name(call_id: u64, args: &[ExecArg]) -> String {
     let Some(desc) = exec_call_desc(call_id) else {
-        return format!("unknown_call({call_id})");
+        return "unknown_call".to_string();
     };
     match desc.kind {
         ExecCallKind::Fixed { .. } => desc.name.to_string(),
         ExecCallKind::RawEcall => {
             let eid = semantic_arg_value(args.first());
             let fid = semantic_arg_value(args.get(1));
-            if let Some(mapped_id) = exec_call_id_for(eid, fid).filter(|id| *id != 0) {
-                if let Some(mapped_desc) = exec_call_desc(mapped_id) {
-                    return format!("raw->{}", mapped_desc.name);
+            format!("raw->{}", semantic_call_bucket(eid, fid))
+        }
+    }
+}
+
+fn exec_timeout_signature(program: &ExecProgram) -> String {
+    let mut steps = Vec::new();
+    let mut current_hart = 0_u64;
+    let mut current_busy_wait = 0_u64;
+    for instr in &program.instructions {
+        match instr {
+            ExecInstr::SetProps { value } => {
+                let (kind, payload) = decode_exec_prop(*value);
+                match kind {
+                    EXEC_PROP_TARGET_HART => current_hart = payload,
+                    EXEC_PROP_BUSY_WAIT => current_busy_wait = payload,
+                    _ => {}
                 }
             }
-            if eid == 0x10 {
-                return format!("raw->{}", base_call_name(fid));
+            ExecInstr::Call { call_id, args, .. } => {
+                let mut call = format!(
+                    "hart{current_hart}:{}",
+                    exec_timeout_call_name(*call_id, args)
+                );
+                if current_busy_wait > 0 {
+                    call.push_str(&format!("@w{current_busy_wait}"));
+                }
+                steps.push(call);
             }
-            format!("raw(0x{eid:x},0x{fid:x})")
+            ExecInstr::CopyIn { .. } | ExecInstr::CopyOut { .. } => {}
         }
+    }
+    if steps.is_empty() {
+        "empty".to_string()
+    } else {
+        steps.join("|")
+    }
+}
+
+fn exec_timeout_call_name(call_id: u64, args: &[ExecArg]) -> String {
+    let Some(desc) = exec_call_desc(call_id) else {
+        return "unknown_call".to_string();
+    };
+    match desc.kind {
+        ExecCallKind::Fixed { .. } => desc.name.to_string(),
+        ExecCallKind::RawEcall => {
+            let eid = semantic_arg_value(args.first());
+            let fid = semantic_arg_value(args.get(1));
+            timeout_call_bucket(eid, fid)
+        }
+    }
+}
+
+fn timeout_call_bucket(eid: u64, fid: u64) -> String {
+    if raw_call_is_high_value(eid, fid) {
+        semantic_call_bucket(eid, fid)
+    } else {
+        "filtered_timeout".to_string()
+    }
+}
+
+fn raw_call_is_high_value(eid: u64, fid: u64) -> bool {
+    exec_call_id_for(eid, fid).filter(|id| *id != 0).is_some()
+        || eid <= 0xF
+        || (eid == 0x10 && fid <= 6)
+}
+
+fn exec_program_uses_high_value_calls(program: &ExecProgram) -> bool {
+    program.instructions.iter().all(|instr| match instr {
+        ExecInstr::Call { call_id, args, .. } => {
+            let Some(desc) = exec_call_desc(*call_id) else {
+                return false;
+            };
+            match desc.kind {
+                ExecCallKind::Fixed { .. } => true,
+                ExecCallKind::RawEcall => raw_call_is_high_value(
+                    semantic_arg_value(args.first()),
+                    semantic_arg_value(args.get(1)),
+                ),
+            }
+        }
+        ExecInstr::CopyIn { .. } | ExecInstr::CopyOut { .. } | ExecInstr::SetProps { .. } => true,
+    })
+}
+
+fn timeout_case_is_high_value(exec_program: Option<&ExecProgram>, input: &InputData) -> bool {
+    exec_program
+        .map(exec_program_uses_high_value_calls)
+        .unwrap_or_else(|| raw_call_is_high_value(input.args.eid, input.args.fid))
+}
+
+fn semantic_call_bucket(eid: u64, fid: u64) -> String {
+    if let Some(mapped_id) = exec_call_id_for(eid, fid).filter(|id| *id != 0) {
+        if let Some(mapped_desc) = exec_call_desc(mapped_id) {
+            return mapped_desc.name.to_string();
+        }
+    }
+
+    let extension = get_extension_name(eid);
+    match extension.as_str() {
+        "unknown" => "unknown_extension".to_string(),
+        "base" => base_call_name(fid).to_string(),
+        _ if extension.starts_with("legacy-") => extension,
+        _ => format!("{extension}_unknown"),
     }
 }
 
@@ -854,8 +1009,7 @@ impl MultiMonitorWithCSV {
     /// Returns the number of edges found.
     fn count_edges_found(&self) -> usize {
         let mut count = 0;
-        for i in 0..self.client_stats_count() {
-            let client = self.client_stats_for(libafl_bolts::ClientId((i + 1) as _));
+        for client in self.client_stats() {
             client
                 .user_monitor
                 .get("edges")
@@ -937,7 +1091,10 @@ impl Monitor for MultiMonitorWithCSV {
                     &edges.to_string(),
                 ])
                 .expect("write csv global data");
-            let client = &mut self.client_stats_mut()[client_id.0 as usize];
+            let Some(client) = self.client_stats_mut().get_mut(client_id.0 as usize) else {
+                writer.flush().expect("flush csv");
+                return;
+            };
             let edges = client
                 .user_monitor
                 .get("edges")
@@ -1079,9 +1236,40 @@ impl_serdeany!(ObjectiveCountMetadata);
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{
+        fs,
+        time::{SystemTime, UNIX_EPOCH},
+    };
 
     fn const_arg(value: u64) -> ExecArg {
         ExecArg::Const { size: 8, value }
+    }
+
+    struct TestDir(PathBuf);
+
+    impl TestDir {
+        fn new() -> Self {
+            let unique = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("current time")
+                .as_nanos();
+            let path = std::env::temp_dir().join(format!(
+                "sbifuzz-fuzzer-test-{}-{unique}",
+                std::process::id()
+            ));
+            fs::create_dir_all(&path).expect("create test dir");
+            Self(path)
+        }
+
+        fn path(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl Drop for TestDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
     }
 
     #[test]
@@ -1153,5 +1341,155 @@ mod tests {
             metadata.get_objective_key_count("Timeout|hart2:raw->base_get_impl_version"),
             1
         );
+    }
+
+    #[test]
+    fn objective_key_canonicalizes_unknown_calls() {
+        let input = InputData {
+            metadata: Metadata::from_call(0xdead_beef, 0xbeef, "test".to_string()),
+            args: Args {
+                eid: 0xdead_beef,
+                fid: 0xbeef,
+                arg0: 0,
+                arg1: 0,
+                arg2: 0,
+                arg3: 0,
+                arg4: 0,
+                arg5: 0,
+            },
+        };
+
+        let key = objective_key_for_case(None, &input, Some(&ExitKind::Timeout));
+        assert_eq!(key.as_deref(), Some("Timeout|call:filtered_timeout"));
+    }
+
+    #[test]
+    fn list_bootstrap_paths_prefers_seed_dir_and_skips_metadata() {
+        let root = TestDir::new();
+        let seed_dir = root.path().join("seeds");
+        let objective_raw_dir = root.path().join("raw");
+        fs::create_dir_all(&seed_dir).expect("create seed dir");
+        fs::create_dir_all(&objective_raw_dir).expect("create raw dir");
+
+        let seed_exec = exec_program_to_bytes(&ExecProgram {
+            instructions: vec![],
+        });
+        fs::write(seed_dir.join("seed-a"), &seed_exec).expect("write seed exec");
+        fs::write(objective_raw_dir.join("old.exec"), &seed_exec).expect("write raw exec");
+        fs::write(objective_raw_dir.join(".old_1.metadata"), b"metadata").expect("write metadata");
+        fs::write(objective_raw_dir.join("note.txt"), b"not an exec").expect("write note");
+
+        let paths = list_bootstrap_paths(&objective_raw_dir, Some(&seed_dir), 8);
+        assert_eq!(paths, vec![seed_dir.join("seed-a")]);
+    }
+
+    #[test]
+    fn list_bootstrap_paths_filters_invalid_objective_files() {
+        let root = TestDir::new();
+        let objective_raw_dir = root.path().join("raw");
+        fs::create_dir_all(&objective_raw_dir).expect("create raw dir");
+
+        let exec_bytes = exec_program_to_bytes(&ExecProgram {
+            instructions: vec![],
+        });
+        fs::write(objective_raw_dir.join("valid.exec"), &exec_bytes).expect("write valid exec");
+        fs::write(objective_raw_dir.join("valid-no-ext"), &exec_bytes)
+            .expect("write valid exec without ext");
+        fs::write(objective_raw_dir.join(".hidden"), &exec_bytes).expect("write hidden file");
+        fs::write(objective_raw_dir.join("junk.bin"), b"junk").expect("write junk file");
+
+        let paths = list_bootstrap_paths(&objective_raw_dir, None, 8);
+        assert_eq!(
+            paths,
+            vec![
+                objective_raw_dir.join("valid-no-ext"),
+                objective_raw_dir.join("valid.exec"),
+            ]
+        );
+    }
+
+    #[test]
+    fn exec_program_high_value_filter_rejects_unknown_raw_ecall() {
+        let program = ExecProgram {
+            instructions: vec![ExecInstr::Call {
+                call_id: 0,
+                copyout_index: EXEC_NO_COPYOUT,
+                args: vec![
+                    const_arg(0xdead_beef),
+                    const_arg(0),
+                    const_arg(0),
+                    const_arg(0),
+                    const_arg(0),
+                    const_arg(0),
+                    const_arg(0),
+                    const_arg(0),
+                ],
+            }],
+        };
+
+        assert!(!exec_program_uses_high_value_calls(&program));
+        assert!(!timeout_case_is_high_value(
+            Some(&program),
+            &InputData {
+                metadata: Metadata::from_call(0xdead_beef, 0, "test".to_string()),
+                args: Args {
+                    eid: 0xdead_beef,
+                    fid: 0,
+                    arg0: 0,
+                    arg1: 0,
+                    arg2: 0,
+                    arg3: 0,
+                    arg4: 0,
+                    arg5: 0,
+                },
+            }
+        ));
+    }
+
+    #[test]
+    fn timeout_signature_ignores_copyin_noise() {
+        let lhs = ExecProgram {
+            instructions: vec![
+                ExecInstr::CopyIn {
+                    addr: 0x8000_1000,
+                    arg: ExecArg::Const { size: 8, value: 1 },
+                },
+                ExecInstr::Call {
+                    call_id: 8,
+                    copyout_index: EXEC_NO_COPYOUT,
+                    args: vec![
+                        const_arg(0x1000_0000),
+                        const_arg(4),
+                        const_arg(0),
+                        const_arg(0),
+                        const_arg(0),
+                        const_arg(0),
+                    ],
+                },
+            ],
+        };
+        let rhs = ExecProgram {
+            instructions: vec![
+                ExecInstr::CopyIn {
+                    addr: 0x8000_2000,
+                    arg: ExecArg::Const { size: 8, value: 2 },
+                },
+                ExecInstr::Call {
+                    call_id: 8,
+                    copyout_index: EXEC_NO_COPYOUT,
+                    args: vec![
+                        const_arg(0x1000_1000),
+                        const_arg(8),
+                        const_arg(0),
+                        const_arg(0),
+                        const_arg(0),
+                        const_arg(0),
+                    ],
+                },
+            ],
+        };
+
+        assert_eq!(exec_timeout_signature(&lhs), exec_timeout_signature(&rhs));
+        assert_ne!(exec_semantic_signature(&lhs), exec_semantic_signature(&rhs));
     }
 }

@@ -154,6 +154,22 @@ fn prepare_seeds(dir: &PathBuf) -> PathBuf {
                     .write_all(&exec_bytes)
                     .expect("write binary seed file");
             }
+            "seq" => {
+                let raw = fs::read(entry_path).expect("read sequence seed file");
+                let sequence = sequence_program_from_bytes(&raw).expect("parse sequence seed file");
+                let Ok(exec_program) = sequence_program_to_exec(&sequence) else {
+                    eprintln!(
+                        "Skipping host-only sequence seed {} because it cannot be lowered to firmware exec",
+                        entry_path.display()
+                    );
+                    continue;
+                };
+                let mut output_file =
+                    File::create(&output_file_path).expect("create binary seed file");
+                output_file
+                    .write_all(&exec_program_to_bytes(&exec_program))
+                    .expect("write binary seed file");
+            }
             _ => continue,
         }
     }
@@ -200,6 +216,11 @@ fn gen_skip_input_fn(skip_halt: bool, skip_inputs: &[SkipInput]) -> impl Fn(&Inp
 fn main() {
     // Parse command line arguments
     let args = Cli::parse();
+
+    if let Err(err) = validate_target_supports_external_kernel_payload(&args.target) {
+        eprintln!("Target artifact contract mismatch: {err}");
+        process::exit(2);
+    }
 
     // Convert seed files from TOML to binary format
     let mut seed_dir = None;

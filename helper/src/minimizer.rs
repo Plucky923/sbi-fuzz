@@ -2,7 +2,8 @@ use common::{
     EXEC_MAGIC, EXEC_NO_COPYOUT, EXEC_PROP_BUSY_WAIT, EXEC_PROP_TARGET_HART, ExecArg, ExecCallKind,
     ExecInstr, ExecProgram, decode_exec_prop, exec_call_desc, exec_call_id_for,
     exec_program_from_bytes, exec_program_from_input, exec_program_to_bytes, fix_input_args,
-    format_exec_prop, input_from_binary, input_from_toml, validate_exec_program,
+    format_exec_prop, get_extension_name, input_from_binary, input_from_toml,
+    validate_exec_program,
 };
 use serde::Serialize;
 use std::{
@@ -177,6 +178,10 @@ fn load_exec_program(path: &Path) -> Result<ExecProgram, String> {
     }
 
     let bytes = fs::read(path).map_err(|err| err.to_string())?;
+    if bytes.starts_with(common::SEQUENCE_MAGIC) {
+        let sequence = common::sequence_program_from_bytes(&bytes)?;
+        return common::sequence_program_to_exec(&sequence);
+    }
     if bytes.starts_with(EXEC_MAGIC) {
         return exec_program_from_bytes(&bytes);
     }
@@ -332,23 +337,31 @@ fn semantic_arg_brief(arg: &ExecArg) -> String {
 
 fn semantic_call_name(call_id: u64, args: &[ExecArg]) -> String {
     let Some(desc) = exec_call_desc(call_id) else {
-        return format!("unknown_call({call_id})");
+        return "unknown_call".to_string();
     };
     match desc.kind {
         ExecCallKind::Fixed { .. } => desc.name.to_string(),
         ExecCallKind::RawEcall => {
             let eid = semantic_arg_value(args.first());
             let fid = semantic_arg_value(args.get(1));
-            if let Some(mapped_id) = exec_call_id_for(eid, fid).filter(|id| *id != 0) {
-                if let Some(mapped_desc) = exec_call_desc(mapped_id) {
-                    return format!("raw->{}", mapped_desc.name);
-                }
-            }
-            if eid == 0x10 {
-                return format!("raw->{}", base_call_name(fid));
-            }
-            format!("raw(0x{eid:x},0x{fid:x})")
+            format!("raw->{}", semantic_call_bucket(eid, fid))
         }
+    }
+}
+
+fn semantic_call_bucket(eid: u64, fid: u64) -> String {
+    if let Some(mapped_id) = exec_call_id_for(eid, fid).filter(|id| *id != 0) {
+        if let Some(mapped_desc) = exec_call_desc(mapped_id) {
+            return mapped_desc.name.to_string();
+        }
+    }
+
+    let extension = get_extension_name(eid);
+    match extension.as_str() {
+        "unknown" => "unknown_extension".to_string(),
+        "base" => base_call_name(fid).to_string(),
+        _ if extension.starts_with("legacy-") => extension,
+        _ => format!("{extension}_unknown"),
     }
 }
 
@@ -578,5 +591,29 @@ mod tests {
             profile.calls,
             vec!["hart2:raw->base_get_impl_version@wait512"]
         );
+    }
+
+    #[test]
+    fn semantic_profile_canonicalizes_unknown_raw_calls() {
+        let program = ExecProgram {
+            instructions: vec![ExecInstr::Call {
+                call_id: 0,
+                copyout_index: EXEC_NO_COPYOUT,
+                args: vec![
+                    const_arg(0xdead_beef),
+                    const_arg(0x1234),
+                    const_arg(0),
+                    const_arg(0),
+                    const_arg(0),
+                    const_arg(0),
+                    const_arg(0),
+                    const_arg(0),
+                ],
+            }],
+        };
+
+        let profile = build_exec_semantic_profile(&program);
+        assert!(profile.signature.contains("raw->unknown_extension"));
+        assert!(!profile.signature.contains("raw(0x"));
     }
 }

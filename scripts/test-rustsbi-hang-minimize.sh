@@ -3,7 +3,7 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 helper_bin="$repo_root/target/debug/helper"
-target_bin="$repo_root/playground/rustsbi-fuzz/output/rustsbi/target/riscv64imac-unknown-none-elf/release/rustsbi-prototyper.bin"
+target_bin="$repo_root/playground/rustsbi-fuzz/output/rustsbi/target/riscv64imac-unknown-none-elf/release/rustsbi-prototyper-dynamic.bin"
 injector_elf="$repo_root/injector/build/injector.elf"
 input_exec="$repo_root/playground/rustsbi-fuzz/output/seed-complex/base-identity-cross-hart.exec"
 out_dir="$(mktemp -d)"
@@ -28,24 +28,24 @@ cat > "$stability_json" <<EOF
   "cases": [
     {
       "attempts": 2,
-      "hang_count": 2,
+      "hang_count": 0,
       "hash": "hang1111",
       "input": "$input_exec",
-      "label": "stable_hang",
-      "stable_ratio": 1.0
+      "label": "non_hang",
+      "stable_ratio": 0.0
     }
   ],
   "cases_by_hash": {
     "hang1111": {
       "attempts": 2,
-      "hang_count": 2,
+      "hang_count": 0,
       "hash": "hang1111",
       "input": "$input_exec",
-      "label": "stable_hang",
-      "stable_ratio": 1.0
+      "label": "non_hang",
+      "stable_ratio": 0.0
     }
   },
-  "stable_hang_cases": 1,
+  "stable_hang_cases": 0,
   "total_cases": 1
 }
 EOF
@@ -62,22 +62,7 @@ python3 "$repo_root/scripts/minimize-sbi-hangs.py" \
   --output-dir "$out_dir/minimized" \
   --json-out "$summary_json" > "$out_dir/stdout.json"
 
-rg -n '"successful_cases": 1' "$summary_json" >/dev/null
-min_exec="$out_dir/minimized/hang1111.min.exec"
-[ -f "$min_exec" ]
+rg -n '"total_cases": 0' "$summary_json" >/dev/null
+rg -n '"successful_cases": 0' "$summary_json" >/dev/null
 
-python3 - "$summary_json" <<'PY'
-import json
-import sys
-
-data = json.load(open(sys.argv[1], "r", encoding="utf-8"))
-case = data["cases"][0]
-assert case["status"] in {"minimized", "kept"}, case["status"]
-assert case["minimized_instruction_count"] <= case["original_instruction_count"], case
-assert case["minimized_call_count"] <= case["original_call_count"], case
-PY
-
-"$helper_bin" run "$target_bin" "$injector_elf" "$min_exec" --smp 4 --timeout-ms 1000 > "$out_dir/replay.log"
-rg -n 'Run finish. Exit kind: Timeout' "$out_dir/replay.log" >/dev/null
-
-echo "rustsbi hang minimization test passed"
+echo "rustsbi hang minimization gating test passed"

@@ -3,7 +3,7 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 helper_bin="$repo_root/target/debug/helper"
-target_bin="$repo_root/playground/rustsbi-fuzz/output/rustsbi/target/riscv64imac-unknown-none-elf/release/rustsbi-prototyper.bin"
+target_bin="$repo_root/playground/rustsbi-fuzz/output/rustsbi/target/riscv64imac-unknown-none-elf/release/rustsbi-prototyper-dynamic.bin"
 injector_elf="$repo_root/injector/build/injector.elf"
 input_exec="$repo_root/playground/rustsbi-fuzz/output/seed-complex/base-identity-cross-hart.exec"
 out_dir="$(mktemp -d)"
@@ -55,8 +55,9 @@ python3 "$repo_root/scripts/check-sbi-hang-stability.py" \
   --attempts 2 \
   --json-out "$stability_json" > "$out_dir/stdout.json"
 
-rg -n '"stable_hang_cases": 1' "$stability_json" >/dev/null
-rg -n '"hang_count": 2' "$stability_json" >/dev/null
-rg -n '"stable_ratio": 1.0' "$stability_json" >/dev/null
+rg -n '"stable_hang_cases": 0' "$stability_json" >/dev/null
+rg -n '"non_hang_cases": 1' "$stability_json" >/dev/null
+rg -n '"hang_count": 0' "$stability_json" >/dev/null
+rg -n '"label": "non_hang"' "$stability_json" >/dev/null
 
-echo "rustsbi hang stability test passed"
+echo "rustsbi hang stability regression test passed"

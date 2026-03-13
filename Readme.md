@@ -118,6 +118,43 @@ These RustSBI scenario seeds also use `setprops` metadata inside the exec stream
 
 The injector now also embeds semantic RustSBI oracles that are independent from fuzz input bytes: it checks that `hsm_hart_status(0)` always reports hart0 as started, and that repeated Base extension identity queries with identical arguments stay stable across harts. When one of these invariants breaks, replay output includes an `Oracle failure ...` line and the case is bucketed with the `oracle` signal.
 
+For stateful single-target fuzzing, the helper now also supports a unified `sequence` wire format (`.seq`). It can describe memory objects, target-hart changes, busy waits, host-side hart state changes, FDT parses, and multi-call SBI sequences for either OpenSBI or RustSBI.
+
+To generate a starter corpus for both implementations:
+
+```bash
+cargo helper generate-sequence-seeds --target-kind both /tmp/sequence-seeds
+```
+
+To inspect one generated sequence:
+
+```bash
+cargo helper describe-sequence /tmp/sequence-seeds/shared-base-hsm-status.seq
+```
+
+To run the same sequence on one host-side backend:
+
+```bash
+cargo helper run-sequence --target-kind opensbi /tmp/sequence-seeds/shared-base-hsm-status.seq
+cargo helper run-sequence --target-kind rustsbi /tmp/sequence-seeds/shared-base-hsm-status.seq
+```
+
+The existing `helper run`, `collect-coverage`, `minimize-hang`, and the main fuzzer bootstrap path now also accept `.seq` inputs when the sequence can be lowered into the current firmware-side `.exec` program subset.
+
+To replay a whole `.seq` directory against one target and summarize the interesting cases:
+
+```bash
+python3 scripts/replay-sequence-results.py opensbi /tmp/sequence-seeds --all --json-out /tmp/sequence.replay.json
+python3 scripts/report-sequence-bugs.py /tmp/sequence.replay.json --json-out /tmp/sequence.bugs.json --md-out /tmp/sequence.bugs.md
+```
+
+To run the same flow as a single-target campaign:
+
+```bash
+python3 scripts/run-sequence-campaign.py opensbi-sequence opensbi /tmp/sequence-seeds --json-out /tmp/sequence.campaign.json
+python3 scripts/run-sequence-campaign.py rustsbi-sequence rustsbi /tmp/sequence-seeds --json-out /tmp/sequence.campaign.json
+```
+
 To import Linux-style `sbi_ecall(...)` samples into seed TOML files:
 
 ```bash
@@ -207,6 +244,8 @@ To run the same automated campaign against the pinned RustSBI prototyper target:
 ```bash
 make campaign-rustsbi
 ```
+
+For RustSBI system-level fuzzing and replay with the external `injector.elf`, the target artifact must be the dynamic prototyper build (`rustsbi-prototyper-dynamic.bin`). Using the plain `rustsbi-prototyper.bin` image can violate the boot contract for an external next-stage payload and produce harness-level false positives instead of target bugs.
 
 To run the more complex RustSBI campaign with scenario seeds and `-smp 4` by default:
 
