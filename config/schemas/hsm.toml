@@ -1,0 +1,47 @@
+[metadata]
+extension = "hsm"
+note = "Hart lifecycle calls mix hart IDs, resume addresses, and opaque scratch values."
+
+# sbi_hart_start: Start a hart at a given address
+[[calls]]
+eid = 0x48534D
+fid = 0x0
+arg0 = "hart_id"
+arg1 = "address"      # start_addr - physical address to start execution
+arg2 = "opaque"       # opaque parameter passed to started hart
+arg3 = "value"
+arg4 = "value"
+arg5 = "value"
+
+# sbi_hart_stop: Stop the current hart
+[[calls]]
+eid = 0x48534D
+fid = 0x1
+arg0 = "value"
+arg1 = "value"
+arg2 = "value"
+arg3 = "value"
+arg4 = "value"
+arg5 = "value"
+
+# sbi_hart_get_status: Get status of a hart
+[[calls]]
+eid = 0x48534D
+fid = 0x2
+arg0 = "hart_id"
+arg1 = "value"
+arg2 = "value"
+arg3 = "value"
+arg4 = "value"
+arg5 = "value"
+
+# sbi_hart_suspend: Suspend the current hart
+[[calls]]
+eid = 0x48534D
+fid = 0x3
+arg0 = "suspend_type"  # 0x00000000 = retentive, 0x80000000 = non-retentive
+arg1 = "address"       # resume_addr - physical address to resume execution
+arg2 = "opaque"        # opaque parameter passed on resume
+arg3 = "value"
+arg4 = "value"
+arg5 = "value"

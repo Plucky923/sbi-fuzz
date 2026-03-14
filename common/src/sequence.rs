@@ -1,7 +1,7 @@
 use crate::{
-    Args, EXEC_BUFFER_SIZE, ExecArg, ExecCallKind, ExecInstr, ExecProgram, HostHartState,
-    HostPlatformFaultProfile, HostPrivilegeState, HostTargetKind, InputData, Metadata,
-    exec_call_desc, exec_call_id_for, exec_program_describe, exec_program_primary_input,
+    Args, ArgumentKind, EXEC_BUFFER_SIZE, ExecArg, ExecCallKind, ExecInstr, ExecProgram,
+    HostHartState, HostPlatformFaultProfile, HostPrivilegeState, HostTargetKind, InputData,
+    Metadata, exec_call_desc, exec_call_id_for, exec_program_describe, exec_program_primary_input,
     exec_prop_busy_wait, exec_prop_target_hart, fix_input_args,
 };
 use serde::{Deserialize, Serialize};
@@ -864,6 +864,164 @@ pub fn sequence_program_from_toml_input(input: &InputData) -> SequenceProgram {
             expect: None,
         }],
     })
+}
+
+pub fn sequence_program_from_semantic_input(
+    input: &InputData,
+    name: String,
+    source: String,
+    env: SequenceEnv,
+) -> SequenceProgram {
+    let mut program = SequenceProgram {
+        metadata: SequenceMetadata {
+            name,
+            source,
+            note: "schema-driven semantic call".to_string(),
+        },
+        env,
+        memory: Vec::new(),
+        steps: Vec::new(),
+    };
+
+    let args = semantic_sequence_args_from_input(input, &mut program.memory);
+    program.steps.push(SequenceStep::Call {
+        label: input.metadata.extension_name.clone(),
+        eid: input.args.eid,
+        fid: input.args.fid,
+        args,
+        expect: None,
+    });
+    validate_sequence_program(&program).expect("semantic sequence should validate");
+    program
+}
+
+fn semantic_sequence_args_from_input(
+    input: &InputData,
+    memory: &mut Vec<SequenceMemoryObject>,
+) -> Vec<SequenceArg> {
+    let schema = input.schema();
+    let mut args = Vec::with_capacity(6);
+    let mut pending_split_object: Option<String> = None;
+
+    for index in 0..6 {
+        let kind = schema.argument_kind(index);
+        let value = input.args.get(index);
+        let arg = match kind {
+            ArgumentKind::Address | ArgumentKind::HartMaskAddress => {
+                if value == 0 {
+                    SequenceArg::Const { value }
+                } else {
+                    let object = ensure_semantic_memory(memory, index, kind, value);
+                    SequenceArg::MemoryAddr { object }
+                }
+            }
+            ArgumentKind::AddressLow => {
+                if value == 0 {
+                    pending_split_object = None;
+                    SequenceArg::Const { value }
+                } else {
+                    let object = ensure_semantic_memory(memory, index, kind, value);
+                    pending_split_object = Some(object.clone());
+                    SequenceArg::MemoryAddrLow { object }
+                }
+            }
+            ArgumentKind::AddressHigh => {
+                if let Some(object) = pending_split_object.clone() {
+                    SequenceArg::MemoryAddrHigh { object }
+                } else {
+                    SequenceArg::Const { value }
+                }
+            }
+            ArgumentKind::Size => {
+                if let Some(object) = semantic_memory_object_for_size(input, memory, index, &schema)
+                {
+                    SequenceArg::MemoryLen { object }
+                } else {
+                    SequenceArg::Const { value }
+                }
+            }
+            ArgumentKind::Count
+            | ArgumentKind::Flags
+            | ArgumentKind::HartId
+            | ArgumentKind::SuspendType
+            | ArgumentKind::Opaque
+            | ArgumentKind::Value => SequenceArg::Const { value },
+        };
+        args.push(arg);
+
+        if !matches!(kind, ArgumentKind::AddressLow | ArgumentKind::AddressHigh) {
+            pending_split_object = None;
+        }
+    }
+
+    args
+}
+
+fn ensure_semantic_memory(
+    memory: &mut Vec<SequenceMemoryObject>,
+    index: usize,
+    kind: ArgumentKind,
+    guest_addr: u64,
+) -> String {
+    let id = format!("arg{index}_mem");
+    if memory.iter().any(|object| object.id == id) {
+        return id;
+    }
+
+    let bytes = semantic_memory_bytes(kind, index);
+    let slot_offset = align_semantic_slot(
+        memory
+            .last()
+            .map(|object| object.slot_offset + object.bytes.len() as u64)
+            .unwrap_or(0x100),
+    );
+    memory.push(SequenceMemoryObject {
+        id: id.clone(),
+        slot_offset,
+        guest_addr: Some(guest_addr),
+        read: true,
+        write: true,
+        execute: false,
+        bytes,
+    });
+    id
+}
+
+fn semantic_memory_object_for_size(
+    input: &InputData,
+    memory: &mut Vec<SequenceMemoryObject>,
+    index: usize,
+    schema: &crate::CallSchema,
+) -> Option<String> {
+    let next_index = index + 1;
+    if next_index >= 6 {
+        return None;
+    }
+    let next_kind = schema.argument_kind(next_index);
+    if !matches!(
+        next_kind,
+        ArgumentKind::Address | ArgumentKind::AddressLow | ArgumentKind::HartMaskAddress
+    ) {
+        return None;
+    }
+    let guest_addr = input.args.get(next_index);
+    if guest_addr == 0 {
+        return None;
+    }
+    Some(ensure_semantic_memory(
+        memory, next_index, next_kind, guest_addr,
+    ))
+}
+
+fn semantic_memory_bytes(kind: ArgumentKind, index: usize) -> Vec<u8> {
+    match kind {
+        ArgumentKind::HartMaskAddress => 0x6_u64.to_le_bytes().to_vec(),
+        _ => format!("arg{index}-semantic-buffer").into_bytes(),
+    }
+}
+
+fn align_semantic_slot(value: u64) -> u64 {
+    (value + 0x1f) & !0x1f
 }
 
 pub fn sequence_program_primary_exec_input(program: &SequenceProgram) -> Option<InputData> {

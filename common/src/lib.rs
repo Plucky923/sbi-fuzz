@@ -1,16 +1,21 @@
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use sha2::{Digest, Sha256};
+use std::collections::HashSet;
 use std::num::ParseIntError;
 use std::path::Path;
 
 mod coverage;
 mod exec;
 mod host;
+mod schema_registry;
+mod semantic_mutation;
 mod sequence;
 
 pub use coverage::*;
 pub use exec::*;
 pub use host::*;
+pub use schema_registry::*;
+pub use semantic_mutation::*;
 pub use sequence::*;
 
 /// Represents the complete input data structure for SBI calls
@@ -19,6 +24,12 @@ pub use sequence::*;
 pub struct InputData {
     pub metadata: Metadata,
     pub args: Args,
+}
+
+#[derive(Debug, Clone)]
+pub struct SeedInputVariant {
+    pub file_suffix: String,
+    pub input: InputData,
 }
 
 /// Metadata information about the SBI call
@@ -56,6 +67,24 @@ pub enum ArgumentKind {
     HartMaskAddress,
     SuspendType,
     Opaque,
+}
+
+impl ArgumentKind {
+    pub const fn short_code(self) -> char {
+        match self {
+            ArgumentKind::Value => 'v',
+            ArgumentKind::Address => 'a',
+            ArgumentKind::AddressLow => 'l',
+            ArgumentKind::AddressHigh => 'h',
+            ArgumentKind::Size => 's',
+            ArgumentKind::Count => 'c',
+            ArgumentKind::Flags => 'f',
+            ArgumentKind::HartId => 'i',
+            ArgumentKind::HartMaskAddress => 'm',
+            ArgumentKind::SuspendType => 't',
+            ArgumentKind::Opaque => 'o',
+        }
+    }
 }
 
 /// Semantic schema for the six SBI arguments.
@@ -104,6 +133,12 @@ impl CallSchema {
             5 => self.arg5,
             _ => panic!("invalid argument index: {index}"),
         }
+    }
+
+    pub fn compact_signature(&self) -> String {
+        (0..6)
+            .map(|index| self.argument_kind(index).short_code())
+            .collect()
     }
 }
 
@@ -290,6 +325,103 @@ pub fn input_to_binary(input: &InputData) -> Vec<u8> {
     binary_content
 }
 
+pub fn generate_seed_variants(eid: u64, fid: u64, source_prefix: &str) -> Vec<SeedInputVariant> {
+    let baseline = fix_input_args(InputData {
+        metadata: Metadata::from_call(eid, fid, source_prefix.to_string()),
+        args: Args {
+            eid,
+            fid,
+            arg0: 0,
+            arg1: 0,
+            arg2: 0,
+            arg3: 0,
+            arg4: 0,
+            arg5: 0,
+        },
+    });
+
+    let mut variants = vec![SeedInputVariant {
+        file_suffix: String::new(),
+        input: baseline.clone(),
+    }];
+    let mut seen = HashSet::from([input_to_binary(&baseline)]);
+    let schema = baseline.schema();
+
+    for index in 0..6 {
+        for (label, raw_value) in seed_variant_candidates(schema.argument_kind(index)) {
+            let mut candidate = baseline.clone();
+            candidate.args.set(index, *raw_value);
+            candidate = fix_input_args(candidate);
+            let binary = input_to_binary(&candidate);
+            if !seen.insert(binary) {
+                continue;
+            }
+
+            let suffix = format!("arg{index}-{label}");
+            candidate.metadata.source = format!("{source_prefix}-{suffix}");
+            variants.push(SeedInputVariant {
+                file_suffix: suffix.clone(),
+                input: candidate,
+            });
+        }
+    }
+
+    variants
+}
+
+fn seed_variant_candidates(kind: ArgumentKind) -> &'static [(&'static str, u64)] {
+    match kind {
+        ArgumentKind::Address | ArgumentKind::HartMaskAddress => {
+            semantic_argument_named_candidates(kind)
+        }
+        ArgumentKind::AddressLow => semantic_argument_named_candidates(kind),
+        ArgumentKind::AddressHigh => &[],
+        ArgumentKind::Size => semantic_argument_named_candidates(kind),
+        ArgumentKind::Count => semantic_argument_named_candidates(kind),
+        ArgumentKind::Flags => semantic_argument_named_candidates(kind),
+        ArgumentKind::HartId => semantic_argument_named_candidates(kind),
+        ArgumentKind::SuspendType => semantic_argument_named_candidates(kind),
+        ArgumentKind::Opaque | ArgumentKind::Value => &[],
+    }
+}
+
+pub fn semantic_argument_values(kind: ArgumentKind) -> &'static [u64] {
+    match kind {
+        ArgumentKind::Address | ArgumentKind::HartMaskAddress => {
+            &[START_ADDRESS, START_ADDRESS + 1, END_ADDRESS]
+        }
+        ArgumentKind::AddressLow => &[START_ADDRESS, START_ADDRESS + 1],
+        ArgumentKind::AddressHigh => &[],
+        ArgumentKind::Size => &[1, PAGE_SIZE],
+        ArgumentKind::Count => &[1, 64],
+        ArgumentKind::Flags => &[1, 0xff],
+        ArgumentKind::HartId => &[1, u64::MAX],
+        ArgumentKind::SuspendType => &[1, 0x8000_0000],
+        ArgumentKind::Opaque | ArgumentKind::Value => &[],
+    }
+}
+
+pub fn semantic_argument_named_candidates(kind: ArgumentKind) -> &'static [(&'static str, u64)] {
+    match kind {
+        ArgumentKind::Address | ArgumentKind::HartMaskAddress => &[
+            ("guest", START_ADDRESS),
+            ("unaligned", START_ADDRESS + 1),
+            ("edge", END_ADDRESS),
+        ],
+        ArgumentKind::AddressLow => &[
+            ("guest-low", START_ADDRESS),
+            ("unaligned-low", START_ADDRESS + 1),
+        ],
+        ArgumentKind::AddressHigh => &[],
+        ArgumentKind::Size => &[("tiny", 1), ("page", PAGE_SIZE)],
+        ArgumentKind::Count => &[("single", 1), ("burst", 64)],
+        ArgumentKind::Flags => &[("bit1", 1), ("mask", 0xff)],
+        ArgumentKind::HartId => &[("hart1", 1), ("invalid", u64::MAX)],
+        ArgumentKind::SuspendType => &[("retentive", 1), ("platform", 0x8000_0000)],
+        ArgumentKind::Opaque | ArgumentKind::Value => &[],
+    }
+}
+
 /// Check if an SBI call would cause the system to halt
 pub fn is_halt_sbi_call(eid: u64, fid: u64) -> bool {
     let mut res = false;
@@ -388,6 +520,11 @@ const MAX_PMU_ENTRY_COUNT: u64 = 0x40;
 
 /// Return the argument schema for a known SBI call.
 pub fn get_call_schema(eid: u64, fid: u64) -> CallSchema {
+    resolve_call_schema(default_call_schema_registry(), eid, fid)
+}
+
+/// Return the built-in argument schema for a known SBI call.
+pub fn builtin_call_schema(eid: u64, fid: u64) -> CallSchema {
     match (eid, fid) {
         (0x4, _) => CallSchema::new(
             ArgumentKind::HartMaskAddress,

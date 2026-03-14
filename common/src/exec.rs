@@ -1,4 +1,4 @@
-use crate::{Args, InputData, Metadata, fix_input_args};
+use crate::{Args, InputData, Metadata, fix_input_args, get_call_schema};
 
 pub const EXEC_BUFFER_SIZE: usize = 4 << 10;
 pub const EXEC_MAGIC: &[u8; 8] = b"SBIEXEC1";
@@ -361,19 +361,26 @@ pub fn validate_exec_call_table() -> Result<(), String> {
 }
 
 pub fn format_exec_call_table() -> String {
-    let mut lines = vec!["ID  NAME                     EID         FID        KIND".to_string()];
+    let mut lines =
+        vec!["ID  NAME                     EID         FID        KIND   SCHEMA".to_string()];
     for desc in exec_call_table() {
-        let (eid, fid, kind) = match desc.kind {
-            ExecCallKind::RawEcall => ("-".to_string(), "-".to_string(), "raw".to_string()),
+        let (eid, fid, kind, schema) = match desc.kind {
+            ExecCallKind::RawEcall => (
+                "-".to_string(),
+                "-".to_string(),
+                "raw".to_string(),
+                "-".to_string(),
+            ),
             ExecCallKind::Fixed { eid, fid } => (
                 format!("0x{eid:08x}"),
                 format!("0x{fid:x}"),
                 "fixed".to_string(),
+                get_call_schema(eid, fid).compact_signature(),
             ),
         };
         lines.push(format!(
-            "{:<3} {:<24} {:<11} {:<10} {}",
-            desc.id, desc.name, eid, fid, kind
+            "{:<3} {:<24} {:<11} {:<10} {:<6} {}",
+            desc.id, desc.name, eid, fid, kind, schema
         ));
     }
     lines.join("\n")

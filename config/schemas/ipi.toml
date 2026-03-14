@@ -1,0 +1,12 @@
+[metadata]
+extension = "ipi"
+note = "IPI calls are primarily driven by hart-mask shared-memory pointers."
+
+[[calls]]
+eid = 0x735049
+arg0 = "hart_mask_address"
+arg1 = "value"
+arg2 = "value"
+arg3 = "value"
+arg4 = "value"
+arg5 = "value"

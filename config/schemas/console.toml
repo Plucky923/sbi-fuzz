@@ -1,0 +1,36 @@
+[metadata]
+extension = "console"
+note = "Console writes use a length plus split shared-buffer address."
+
+# sbi_debug_console_write
+[[calls]]
+eid = 0x4442434E
+fid = 0x0
+arg0 = "size"          # num_bytes - number of bytes to write
+arg1 = "address_low"   # base_addr_lo - lower 32 bits of physical address
+arg2 = "address_high"  # base_addr_hi - upper 32 bits of physical address
+arg3 = "value"
+arg4 = "value"
+arg5 = "value"
+
+# sbi_debug_console_read
+[[calls]]
+eid = 0x4442434E
+fid = 0x1
+arg0 = "size"          # num_bytes - number of bytes to read
+arg1 = "address_low"   # base_addr_lo - lower 32 bits of physical address
+arg2 = "address_high"  # base_addr_hi - upper 32 bits of physical address
+arg3 = "value"
+arg4 = "value"
+arg5 = "value"
+
+# sbi_debug_console_write_byte
+[[calls]]
+eid = 0x4442434E
+fid = 0x2
+arg0 = "value"  # byte - single byte to write
+arg1 = "value"
+arg2 = "value"
+arg3 = "value"
+arg4 = "value"
+arg5 = "value"

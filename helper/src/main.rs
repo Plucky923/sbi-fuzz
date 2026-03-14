@@ -84,6 +84,18 @@ enum Commands {
 struct GenerateSeed {
     /// Output directory for generated seeds
     output: String,
+
+    /// Optional TOML lock file describing the seed source repository and commit
+    #[arg(long)]
+    lock_file: Option<PathBuf>,
+
+    /// Override the seed source repository URL or local git path
+    #[arg(long)]
+    repo_url: Option<String>,
+
+    /// Override the git commit checked out before extracting the SBI docs
+    #[arg(long)]
+    commit: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
@@ -307,7 +319,11 @@ fn main() {
     match args.command {
         Commands::GenerateSeed(g) => {
             // Generate seed inputs based on SBI documentation
-            seed_generator::generate(g.output);
+            if let Err(err) = seed_generator::generate(g.output, g.lock_file, g.repo_url, g.commit)
+            {
+                eprintln!("generate-seed failed: {err}");
+                std::process::exit(1);
+            }
         }
         Commands::GenerateHostSeeds(args) => {
             generate_host_seeds(args.target_kind, args.mode, args.output);
@@ -641,6 +657,16 @@ fn fxhash(bytes: &[u8]) -> u32 {
 
 fn list_calls() {
     validate_exec_call_table().expect("validate exec call table");
+    if let Some(dir) = active_call_schema_registry_dir() {
+        println!(
+            "Schema registry: {} ({} entries across {} files)",
+            dir.display(),
+            active_call_schema_registry_entry_count(),
+            active_call_schema_registry_source_count()
+        );
+    } else {
+        println!("Schema registry: built-in defaults");
+    }
     println!("{}", format_exec_call_table());
 }
 

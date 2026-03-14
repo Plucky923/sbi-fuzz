@@ -1,0 +1,102 @@
+[metadata]
+extension = "pmu"
+note = "PMU shared-memory discovery uses split addresses and entry counts."
+
+# sbi_pmu_num_counters
+[[calls]]
+eid = 0x504D55
+fid = 0x0
+arg0 = "value"
+arg1 = "value"
+arg2 = "value"
+arg3 = "value"
+arg4 = "value"
+arg5 = "value"
+
+# sbi_pmu_counter_get_info
+[[calls]]
+eid = 0x504D55
+fid = 0x1
+arg0 = "value"  # counter_idx
+arg1 = "value"
+arg2 = "value"
+arg3 = "value"
+arg4 = "value"
+arg5 = "value"
+
+# sbi_pmu_counter_config_matching
+[[calls]]
+eid = 0x504D55
+fid = 0x2
+arg0 = "value"  # counter_idx_base
+arg1 = "value"  # counter_idx_mask
+arg2 = "flags"  # config_flags
+arg3 = "value"  # event_idx
+arg4 = "value"  # event_data
+arg5 = "value"
+
+# sbi_pmu_counter_start
+[[calls]]
+eid = 0x504D55
+fid = 0x3
+arg0 = "value"  # counter_idx_base
+arg1 = "value"  # counter_idx_mask
+arg2 = "flags"  # start_flags
+arg3 = "value"  # initial_value
+arg4 = "value"
+arg5 = "value"
+
+# sbi_pmu_counter_stop
+[[calls]]
+eid = 0x504D55
+fid = 0x4
+arg0 = "value"  # counter_idx_base
+arg1 = "value"  # counter_idx_mask
+arg2 = "flags"  # stop_flags
+arg3 = "value"
+arg4 = "value"
+arg5 = "value"
+
+# sbi_pmu_counter_fw_read
+[[calls]]
+eid = 0x504D55
+fid = 0x5
+arg0 = "value"  # counter_idx
+arg1 = "value"
+arg2 = "value"
+arg3 = "value"
+arg4 = "value"
+arg5 = "value"
+
+# sbi_pmu_counter_fw_read_hi
+[[calls]]
+eid = 0x504D55
+fid = 0x6
+arg0 = "value"  # counter_idx
+arg1 = "value"
+arg2 = "value"
+arg3 = "value"
+arg4 = "value"
+arg5 = "value"
+
+# sbi_pmu_snapshot_set_shmem
+[[calls]]
+eid = 0x504D55
+fid = 0x7
+arg0 = "address_low"   # shmem_phys_lo - lower 32 bits of shared memory address
+arg1 = "address_high"  # shmem_phys_hi - upper 32 bits of shared memory address
+arg2 = "flags"         # flags
+arg3 = "value"
+arg4 = "value"
+arg5 = "value"
+
+# sbi_pmu_snapshot_get_shmem
+[[calls]]
+eid = 0x504D55
+fid = 0x8
+arg0 = "address_low"   # shmem_phys_lo - lower 32 bits for output
+arg1 = "address_high"  # shmem_phys_hi - upper 32 bits for output
+arg2 = "count"         # entry count
+arg3 = "value"
+arg4 = "value"
+arg5 = "value"

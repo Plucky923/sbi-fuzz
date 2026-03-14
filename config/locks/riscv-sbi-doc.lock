@@ -1,0 +1,4 @@
+repo_url = "https://github.com/riscv-non-isa/riscv-sbi-doc.git"
+
+# Fill in a pinned upstream commit for reproducible seed generation campaigns.
+# commit = "0123456789abcdef0123456789abcdef01234567"

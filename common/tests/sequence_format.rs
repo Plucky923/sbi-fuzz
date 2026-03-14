@@ -3,8 +3,9 @@ use common::{
     HostTargetKind, SEQUENCE_MAGIC, SequenceArg, SequenceCallExpectation, SequenceEnv,
     SequenceMemoryObject, SequenceMetadata, SequenceProgram, SequenceStep,
     sequence_program_describe, sequence_program_from_bytes, sequence_program_from_exec,
-    sequence_program_primary_input, sequence_program_semantic_signature, sequence_program_to_bytes,
-    sequence_program_to_exec, validate_sequence_program,
+    sequence_program_from_semantic_input, sequence_program_primary_input,
+    sequence_program_semantic_signature, sequence_program_to_bytes, sequence_program_to_exec,
+    validate_sequence_program,
 };
 
 fn sample_sequence() -> SequenceProgram {
@@ -185,4 +186,67 @@ fn sequence_validation_rejects_bad_references() {
         expect: None,
     });
     assert!(validate_sequence_program(&invalid).is_err());
+}
+
+#[test]
+fn semantic_sequence_builder_materializes_console_memory_arguments() {
+    let input = common::fix_input_args(common::InputData {
+        metadata: common::Metadata::from_call(0x4442_434e, 0, "console-seed".to_string()),
+        args: common::Args {
+            eid: 0x4442_434e,
+            fid: 0,
+            arg0: 4,
+            arg1: 0x8000_2040,
+            arg2: 0,
+            arg3: 0,
+            arg4: 0,
+            arg5: 0,
+        },
+    });
+
+    let program = sequence_program_from_semantic_input(
+        &input,
+        "console-semantic".to_string(),
+        "generated".to_string(),
+        SequenceEnv::default(),
+    );
+    assert_eq!(program.memory.len(), 1);
+    assert_eq!(program.memory[0].guest_addr, Some(0x8000_2040));
+    match &program.steps[0] {
+        SequenceStep::Call { args, .. } => {
+            assert!(matches!(args[0], SequenceArg::MemoryLen { .. }));
+            assert!(matches!(args[1], SequenceArg::MemoryAddrLow { .. }));
+            assert!(matches!(args[2], SequenceArg::MemoryAddrHigh { .. }));
+        }
+        other => panic!("unexpected step: {other:?}"),
+    }
+}
+
+#[test]
+fn semantic_sequence_builder_keeps_hsm_hart_id_and_address_roles() {
+    let variants = common::generate_seed_variants(0x4853_4d, 0x0, "hsm-seed");
+    let input = variants
+        .into_iter()
+        .find(|variant| variant.file_suffix == "arg1-guest")
+        .expect("address variant")
+        .input;
+
+    let program = sequence_program_from_semantic_input(
+        &input,
+        "hsm-semantic".to_string(),
+        "generated".to_string(),
+        SequenceEnv {
+            smp: 4,
+            impl_hint: Some(HostTargetKind::RustSbi),
+            platform: String::new(),
+        },
+    );
+    assert_eq!(program.memory.len(), 1);
+    match &program.steps[0] {
+        SequenceStep::Call { args, .. } => {
+            assert!(matches!(args[0], SequenceArg::Const { value: 0 }));
+            assert!(matches!(args[1], SequenceArg::MemoryAddr { .. }));
+        }
+        other => panic!("unexpected step: {other:?}"),
+    }
 }

@@ -1,0 +1,80 @@
+[metadata]
+extension = "rfence"
+note = "Remote fence calls mix hart-mask pointers with address and span arguments."
+
+# sbi_remote_fence_i: Instruction fence on remote harts
+[[calls]]
+eid = 0x52464E43
+fid = 0x0
+arg0 = "hart_mask_address"  # pointer to hart mask
+arg1 = "value"              # hart_mask_base
+arg2 = "value"
+arg3 = "value"
+arg4 = "value"
+arg5 = "value"
+
+# sbi_remote_sfence_vma: SFENCE.VMA on remote harts
+[[calls]]
+eid = 0x52464E43
+fid = 0x1
+arg0 = "hart_mask_address"  # pointer to hart mask
+arg1 = "value"              # hart_mask_base
+arg2 = "address"            # start_addr
+arg3 = "size"               # size
+arg4 = "value"
+arg5 = "value"
+
+# sbi_remote_sfence_vma_asid: SFENCE.VMA with ASID on remote harts
+[[calls]]
+eid = 0x52464E43
+fid = 0x2
+arg0 = "hart_mask_address"  # pointer to hart mask
+arg1 = "value"              # hart_mask_base
+arg2 = "address"            # start_addr
+arg3 = "size"               # size
+arg4 = "value"              # asid
+arg5 = "value"
+
+# sbi_remote_hfence_gvma_vmid: HFENCE.GVMA with VMID on remote harts
+[[calls]]
+eid = 0x52464E43
+fid = 0x3
+arg0 = "hart_mask_address"  # pointer to hart mask
+arg1 = "value"              # hart_mask_base
+arg2 = "address"            # start_addr
+arg3 = "size"               # size
+arg4 = "value"              # vmid
+arg5 = "value"
+
+# sbi_remote_hfence_gvma: HFENCE.GVMA on remote harts
+[[calls]]
+eid = 0x52464E43
+fid = 0x4
+arg0 = "hart_mask_address"  # pointer to hart mask
+arg1 = "value"              # hart_mask_base
+arg2 = "address"            # start_addr
+arg3 = "size"               # size
+arg4 = "value"
+arg5 = "value"
+
+# sbi_remote_hfence_vvma_asid: HFENCE.VVMA with ASID on remote harts
+[[calls]]
+eid = 0x52464E43
+fid = 0x5
+arg0 = "hart_mask_address"  # pointer to hart mask
+arg1 = "value"              # hart_mask_base
+arg2 = "address"            # start_addr
+arg3 = "size"               # size
+arg4 = "value"              # asid
+arg5 = "value"
+
+# sbi_remote_hfence_vvma: HFENCE.VVMA on remote harts
+[[calls]]
+eid = 0x52464E43
+fid = 0x6
+arg0 = "hart_mask_address"  # pointer to hart mask
+arg1 = "value"              # hart_mask_base
+arg2 = "address"            # start_addr
+arg3 = "size"               # size
+arg4 = "value"
+arg5 = "value"

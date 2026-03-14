@@ -1,0 +1,80 @@
+[metadata]
+extension = "base"
+note = "Baseline control-plane queries keep value semantics."
+
+# sbi_get_spec_version
+[[calls]]
+eid = 0x10
+fid = 0x0
+arg0 = "value"
+arg1 = "value"
+arg2 = "value"
+arg3 = "value"
+arg4 = "value"
+arg5 = "value"
+
+# sbi_get_impl_id
+[[calls]]
+eid = 0x10
+fid = 0x1
+arg0 = "value"
+arg1 = "value"
+arg2 = "value"
+arg3 = "value"
+arg4 = "value"
+arg5 = "value"
+
+# sbi_get_impl_version
+[[calls]]
+eid = 0x10
+fid = 0x2
+arg0 = "value"
+arg1 = "value"
+arg2 = "value"
+arg3 = "value"
+arg4 = "value"
+arg5 = "value"
+
+# sbi_probe_extension
+[[calls]]
+eid = 0x10
+fid = 0x3
+arg0 = "value"  # extension_id
+arg1 = "value"
+arg2 = "value"
+arg3 = "value"
+arg4 = "value"
+arg5 = "value"
+
+# sbi_get_mvendorid
+[[calls]]
+eid = 0x10
+fid = 0x4
+arg0 = "value"
+arg1 = "value"
+arg2 = "value"
+arg3 = "value"
+arg4 = "value"
+arg5 = "value"
+
+# sbi_get_marchid
+[[calls]]
+eid = 0x10
+fid = 0x5
+arg0 = "value"
+arg1 = "value"
+arg2 = "value"
+arg3 = "value"
+arg4 = "value"
+arg5 = "value"
+
+# sbi_get_mimpid
+[[calls]]
+eid = 0x10
+fid = 0x6
+arg0 = "value"
+arg1 = "value"
+arg2 = "value"
+arg3 = "value"
+arg4 = "value"
+arg5 = "value"

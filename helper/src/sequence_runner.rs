@@ -2,9 +2,10 @@ use common::{
     HostCall, HostHarnessInput, HostHarnessMode, HostHartState, HostMemoryRegion,
     HostPlatformFaultMode, HostPlatformFaultProfile, HostPrivilegeState, HostTargetKind,
     SequenceArg, SequenceFdtExpectation, SequenceMemoryObject, SequenceProgram, SequenceStep,
-    sequence_memory_guest_addr, sequence_program_describe, sequence_program_from_bytes,
-    sequence_program_from_exec, sequence_program_from_toml_input,
-    sequence_program_semantic_signature, sequence_program_to_bytes,
+    generate_seed_variants, sequence_memory_guest_addr, sequence_program_describe,
+    sequence_program_from_bytes, sequence_program_from_exec, sequence_program_from_semantic_input,
+    sequence_program_from_toml_input, sequence_program_semantic_signature,
+    sequence_program_to_bytes,
 };
 use host_harness::{self, FdtSeedVariant, HostHarnessReport, HostHarnessResult};
 use serde::Serialize;
@@ -790,7 +791,7 @@ fn write_sequence_seed(output: &PathBuf, program: &SequenceProgram) -> Result<()
 }
 
 fn shared_sequences() -> Vec<SequenceProgram> {
-    vec![
+    let mut programs = vec![
         SequenceProgram {
             metadata: common::SequenceMetadata {
                 name: "shared-base-hsm-status".to_string(),
@@ -894,7 +895,9 @@ fn shared_sequences() -> Vec<SequenceProgram> {
                 }),
             }],
         },
-    ]
+    ];
+    programs.extend(schema_sequences());
+    programs
 }
 
 fn opensbi_sequences() -> Result<Vec<SequenceProgram>, String> {
@@ -972,6 +975,116 @@ fn zero_args() -> Vec<SequenceArg> {
         SequenceArg::Const { value: 0 },
         SequenceArg::Const { value: 0 },
     ]
+}
+
+struct SchemaSequenceSpec {
+    name: &'static str,
+    note: &'static str,
+    eid: u64,
+    fid: u64,
+    smp: u16,
+    target_hart: Option<u64>,
+    busy_wait: Option<u64>,
+}
+
+fn schema_sequences() -> Vec<SequenceProgram> {
+    let specs = [
+        SchemaSequenceSpec {
+            name: "shared-schema-hsm-hart-start",
+            note: "Schema-driven HSM hart-start variants with explicit hart switching.",
+            eid: 0x4853_4d,
+            fid: 0,
+            smp: 4,
+            target_hart: Some(1),
+            busy_wait: Some(0x200),
+        },
+        SchemaSequenceSpec {
+            name: "shared-schema-hsm-hart-suspend",
+            note: "Schema-driven HSM hart-suspend variants with explicit hart switching.",
+            eid: 0x4853_4d,
+            fid: 3,
+            smp: 4,
+            target_hart: Some(2),
+            busy_wait: Some(0x200),
+        },
+        SchemaSequenceSpec {
+            name: "shared-schema-ipi-send",
+            note: "Schema-driven IPI fanout variants with explicit caller hart changes.",
+            eid: 0x7350_49,
+            fid: 0,
+            smp: 4,
+            target_hart: Some(1),
+            busy_wait: Some(0x400),
+        },
+        SchemaSequenceSpec {
+            name: "shared-schema-rfence-remote-sfence-vma",
+            note: "Schema-driven RFENCE variants with multi-hart timing gaps.",
+            eid: 0x5246_4e43,
+            fid: 1,
+            smp: 4,
+            target_hart: Some(2),
+            busy_wait: Some(0x400),
+        },
+        SchemaSequenceSpec {
+            name: "shared-schema-console-write",
+            note: "Schema-driven console-write variants with memory-backed buffers.",
+            eid: 0x4442_434e,
+            fid: 0,
+            smp: 2,
+            target_hart: Some(1),
+            busy_wait: Some(0x80),
+        },
+        SchemaSequenceSpec {
+            name: "shared-schema-pmu-get-event-info",
+            note: "Schema-driven PMU shared-memory query variants.",
+            eid: 0x504d_55,
+            fid: 8,
+            smp: 2,
+            target_hart: Some(1),
+            busy_wait: Some(0x100),
+        },
+    ];
+
+    let mut programs = Vec::new();
+    for spec in specs {
+        let source_prefix = format!("generated-schema-{}-{:x}", spec.name, spec.fid);
+        for variant in generate_seed_variants(spec.eid, spec.fid, &source_prefix) {
+            let variant_suffix = if variant.file_suffix.is_empty() {
+                "baseline".to_string()
+            } else {
+                variant.file_suffix.clone()
+            };
+            let mut program = sequence_program_from_semantic_input(
+                &variant.input,
+                if variant.file_suffix.is_empty() {
+                    spec.name.to_string()
+                } else {
+                    format!("{}-{}", spec.name, variant.file_suffix)
+                },
+                variant.input.metadata.source.clone(),
+                common::SequenceEnv {
+                    smp: spec.smp,
+                    impl_hint: None,
+                    platform: String::new(),
+                },
+            );
+            if let Some(hart_id) = spec.target_hart {
+                program
+                    .steps
+                    .insert(0, SequenceStep::SetTargetHart { hart_id });
+            }
+            if let Some(iterations) = spec.busy_wait {
+                let insert_at = if spec.target_hart.is_some() { 1 } else { 0 };
+                program
+                    .steps
+                    .insert(insert_at, SequenceStep::BusyWait { iterations });
+            }
+            program.metadata.note = format!("{} Variant: {}", spec.note, variant_suffix);
+            programs.push(program);
+        }
+    }
+
+    programs
 }
 
 fn slugify(name: &str) -> String {
