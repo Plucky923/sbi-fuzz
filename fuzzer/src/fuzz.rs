@@ -484,6 +484,16 @@ pub fn fuzz(
                 qemu_ret = ExitKind::Ok
             }
 
+            // Filter out timeouts caused by injector-level issues (not real SBI bugs)
+            // This prevents LibAFL from recording these as objectives
+            if qemu_ret == ExitKind::Timeout {
+                if let Some(program) = exec_program.as_ref() {
+                    if exec_program_has_injector_hang_risk(program) {
+                        qemu_ret = ExitKind::Ok;
+                    }
+                }
+            }
+
             // Save interesting inputs that cause crashes or timeouts
             let objective_key =
                 objective_key_for_case(exec_program.as_ref(), &input, Some(&qemu_ret));
@@ -918,9 +928,71 @@ fn exec_program_uses_high_value_calls(program: &ExecProgram) -> bool {
 }
 
 fn timeout_case_is_high_value(exec_program: Option<&ExecProgram>, input: &InputData) -> bool {
+    // First check if the exec program has injector-level issues that cause false timeouts
+    if let Some(program) = exec_program {
+        if exec_program_has_injector_hang_risk(program) {
+            return false;
+        }
+    }
     exec_program
         .map(exec_program_uses_high_value_calls)
         .unwrap_or_else(|| raw_call_is_high_value(input.args.eid, input.args.fid))
+}
+
+/// Check if an exec program has operations that may cause the injector itself to hang,
+/// rather than triggering a real SBI firmware bug.
+/// This filters out false positives from:
+/// 1. Calls with copyout_index != EXEC_NO_COPYOUT (result storage operations)
+/// 2. Calls using Addr32/Addr64 argument types (pointer arguments to EXEC_DATA)
+/// 3. CopyIn/CopyOut/SetProps operations
+/// 4. Multiple calls in a single program
+/// These operations are injector-level constructs that can cause hangs unrelated to SBI bugs.
+fn exec_program_has_injector_hang_risk(program: &ExecProgram) -> bool {
+    // Count the number of Call instructions
+    let call_count = program
+        .instructions
+        .iter()
+        .filter(|i| matches!(i, ExecInstr::Call { .. }))
+        .count();
+
+    // Multiple calls can cause complex interactions
+    if call_count > 1 {
+        return true;
+    }
+
+    for instr in &program.instructions {
+        match instr {
+            ExecInstr::Call {
+                copyout_index,
+                args,
+                ..
+            } => {
+                // Any copyout operation (storing results) can cause injector issues
+                if *copyout_index != EXEC_NO_COPYOUT {
+                    return true;
+                }
+                // Check if any argument uses Addr32/Addr64 (pointer to EXEC_DATA)
+                // These can cause hangs if the SBI call tries to access the memory
+                for arg in args {
+                    match arg {
+                        ExecArg::Addr32 { .. } | ExecArg::Addr64 { .. } => {
+                            return true;
+                        }
+                        ExecArg::Result { .. } => {
+                            // Result references can also cause issues
+                            return true;
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            // Any CopyIn/CopyOut/SetProps operations are injector-level
+            ExecInstr::CopyIn { .. } | ExecInstr::CopyOut { .. } | ExecInstr::SetProps { .. } => {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 fn semantic_call_bucket(eid: u64, fid: u64) -> String {

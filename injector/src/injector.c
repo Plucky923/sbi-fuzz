@@ -57,6 +57,8 @@ int __attribute__((noinline)) BREAKPOINT() {
 #define EXEC_ORACLE_KIND_PURE_CALL_MISMATCH 2
 
 #define EXEC_NO_COPYOUT ((uint64_t)-1)
+#define DISPATCH_TIMEOUT_ITERS (1 << 24)
+#define HART_READY_TIMEOUT_ITERS (1 << 20)
 #define SBI_EXT_HSM 0x48534D
 #define SBI_EXT_HSM_HART_START 0
 #define SBI_EXT_BASE 0x10
@@ -406,8 +408,14 @@ static sbiret_t dispatch_call(uint64_t target_hart, uint64_t busy_wait_iters, ui
     memory_barrier();
     HART_DISPATCH.command_seq = seq;
 
+    uint64_t timeout_counter = 0;
     while (HART_DISPATCH.complete_seq != seq) {
         asm volatile("" ::: "memory");
+        if (++timeout_counter > DISPATCH_TIMEOUT_ITERS) {
+            // Timeout waiting for worker hart, return error
+            sbiret_t ret = { .error = -1, .value = 0 };
+            return ret;
+        }
     }
 
     sbiret_t ret = {
