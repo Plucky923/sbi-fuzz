@@ -64,6 +64,17 @@ make
 cargo helper generate-seed output/seed
 ```
 
+For reproducible seed generation, pass an explicit lock file and commit override when needed:
+
+```bash
+cargo helper generate-seed output/seed --lock-file config/locks/riscv-sbi-doc.lock
+cargo helper generate-seed output/seed --commit <pinned-commit>
+```
+
+`generate-seed` now also writes `seed-source.json` into the output directory so the source repo and resolved commit are preserved alongside the generated corpus.
+
+It also emits a small set of schema-driven `.toml` variants per call, keeping the original baseline filename while adding argument-specific suffixes such as `-arg1-guest` or `-arg0-hart1` for higher-risk parameter classes.
+
 4. Run fuzzing:
 ```bash
 cargo fuzzer --target <firmware> --injector <injector> --seed output/seed --output output/result
@@ -90,6 +101,14 @@ To inspect the current exec call registry:
 ```bash
 cargo helper list-calls
 ```
+
+`list-calls` now shows the active schema source and a compact six-slot schema column. The default runtime lookup order is:
+
+1. `SBIFUZZ_SCHEMA_DIR` if set
+2. `config/schemas/` discovered from the current working directory or its parents
+3. the repository default under `config/schemas/`
+
+The initial external schema registry for high-risk extensions lives under `config/schemas/` and currently covers `hsm`, `ipi`, `rfence`, `console`, and `pmu`.
 
 For the new host-side layered harness, generate structured `.host` seeds for either `opensbi` or `rustsbi` and any of the `ecall`, `platform-fault`, or `fdt` modes:
 
@@ -126,6 +145,8 @@ To generate a starter corpus for both implementations:
 cargo helper generate-sequence-seeds --target-kind both /tmp/sequence-seeds
 ```
 
+The generated `.seq` corpus now includes schema-driven single-call semantic templates for high-risk SBI paths such as HSM, IPI, RFENCE, Console, and PMU, in addition to the earlier shared and FDT-oriented examples.
+
 To inspect one generated sequence:
 
 ```bash
@@ -151,9 +172,11 @@ python3 scripts/report-sequence-bugs.py /tmp/sequence.replay.json --json-out /tm
 To run the same flow as a single-target campaign:
 
 ```bash
-python3 scripts/run-sequence-campaign.py opensbi-sequence opensbi /tmp/sequence-seeds --json-out /tmp/sequence.campaign.json
-python3 scripts/run-sequence-campaign.py rustsbi-sequence rustsbi /tmp/sequence-seeds --json-out /tmp/sequence.campaign.json
+python3 scripts/run-sequence-campaign.py opensbi-sequence opensbi /tmp/sequence-seeds --profile host-sequence --json-out /tmp/sequence.campaign.json
+python3 scripts/run-sequence-campaign.py rustsbi-sequence rustsbi /tmp/sequence-seeds --profile host-sequence --json-out /tmp/sequence.campaign.json
 ```
+
+Both campaign runners now accept `--profile <name>` for reproducible settings under `config/campaign-profiles/` and emit `run-manifest.json` under each `campaigns/<run-id>/` directory.
 
 To import Linux-style `sbi_ecall(...)` samples into seed TOML files:
 
@@ -237,6 +260,19 @@ To run the full OpenSBI fuzz → triage → replay → bug-report campaign in on
 
 ```bash
 make campaign-opensbi
+```
+
+For direct script-level control with an explicit firmware profile:
+
+```bash
+python3 scripts/run-sbi-fuzz-campaign.py \
+  opensbi \
+  playground/opensbi-fuzz/output/opensbi/build/platform/generic/firmware/fw_dynamic.bin \
+  injector/build/injector.elf \
+  playground/opensbi-fuzz/output/seed \
+  playground/opensbi-fuzz/output/result \
+  --profile multi-hart-race \
+  --json-out /tmp/opensbi.campaign.json
 ```
 
 To run the same automated campaign against the pinned RustSBI prototyper target:
