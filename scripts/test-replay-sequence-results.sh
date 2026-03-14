@@ -24,10 +24,16 @@ python3 "$repo_root/scripts/run-sequence-campaign.py" \
   opensbi-sequence \
   opensbi \
   "$tmp_dir" \
+  --profile host-sequence \
   --replay-limit 2 \
   --json-out "$campaign_json"
 
 rg -n '"candidate_count":' "$campaign_json" >/dev/null
 rg -n '"replayed_sequences":' "$campaign_json" >/dev/null
+rg -n '"profile_name": "host-sequence"' "$campaign_json" >/dev/null
+
+manifest_path=$(find "$tmp_dir/campaigns" -name run-manifest.json | head -n 1)
+test -n "$manifest_path"
+rg -n '"profile_name": "host-sequence"' "$manifest_path" >/dev/null
 
 echo "sequence replay test passed"

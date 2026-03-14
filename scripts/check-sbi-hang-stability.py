@@ -36,6 +36,7 @@ def summarize_case(entry: dict, attempts: int, target: Path, injector: Path, hel
         label = "non_hang"
     else:
         label = "flaky_hang"
+    stability_score = stable_ratio
 
     return {
         "hash": entry.get("hash"),
@@ -46,6 +47,7 @@ def summarize_case(entry: dict, attempts: int, target: Path, injector: Path, hel
         "attempts": attempts,
         "hang_count": hang_count,
         "stable_ratio": stable_ratio,
+        "stability_score": stability_score,
         "label": label,
         "by_actual": dict(by_actual),
         "by_classification": dict(by_classification),

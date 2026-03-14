@@ -19,7 +19,7 @@ prepare:
 		git clone https://github.com/rustsbi/rustsbi.git output/rustsbi && \
 		(cd output/rustsbi && git checkout eb5a100f81e96d6bde0ce7f6bee1969d60427d1a) && \
 		(cd output/rustsbi && cargo xtask prototyper) && \
-		cargo helper generate-seed output/seed && \
+		cargo helper generate-seed output/seed --lock-file ../../config/locks/riscv-sbi-doc.lock && \
 		cargo helper generate-rustsbi-scenarios output/seed-complex && \
 		echo "> Preparation completed"; \
 	else \
@@ -93,13 +93,13 @@ campaign:
 	@echo "> Running automated RustSBI prototyper fuzz campaign..."
 	@if [ ! -d "output/rustsbi" ]; then $(MAKE) prepare; fi
 	@mkdir -p output/campaign
-	python3 ../../scripts/run-sbi-fuzz-campaign.py rustsbi-prototyper $(RUSTSBI_TARGET) ../../injector/build/injector.elf output/seed output/result --duration-secs $${DURATION_SECS:-300} --cores $${CORES:-1} --smp $${SMP:-1} --replay-max-buckets $${REPLAY_MAX_BUCKETS:-64} --helper-bin ../../target/release/helper --json-out output/campaign/latest.json > output/campaign/latest.stdout.json
+	python3 ../../scripts/run-sbi-fuzz-campaign.py rustsbi-prototyper $(RUSTSBI_TARGET) ../../injector/build/injector.elf output/seed output/result --profile $${PROFILE:-single-hart-fast} --duration-secs $${DURATION_SECS:-300} --cores $${CORES:-1} --smp $${SMP:-1} --replay-max-buckets $${REPLAY_MAX_BUCKETS:-64} --helper-bin ../../target/release/helper --json-out output/campaign/latest.json > output/campaign/latest.stdout.json
 
 campaign-complex: complex-seeds
 	@echo "> Running automated RustSBI complex-scenario campaign..."
 	@if [ ! -d "output/rustsbi" ]; then $(MAKE) prepare; fi
 	@mkdir -p output/campaign
-	python3 ../../scripts/run-sbi-fuzz-campaign.py rustsbi-prototyper-complex $(RUSTSBI_TARGET) ../../injector/build/injector.elf output/seed-complex output/result-complex --duration-secs $${DURATION_SECS:-300} --cores $${CORES:-1} --smp $${SMP:-4} --replay-max-buckets $${REPLAY_MAX_BUCKETS:-64} --helper-bin ../../target/release/helper --json-out output/campaign/latest-complex.json > output/campaign/latest-complex.stdout.json
+	python3 ../../scripts/run-sbi-fuzz-campaign.py rustsbi-prototyper-complex $(RUSTSBI_TARGET) ../../injector/build/injector.elf output/seed-complex output/result-complex --profile $${PROFILE:-multi-hart-race} --duration-secs $${DURATION_SECS:-300} --cores $${CORES:-1} --smp $${SMP:-4} --replay-max-buckets $${REPLAY_MAX_BUCKETS:-64} --helper-bin ../../target/release/helper --json-out output/campaign/latest-complex.json > output/campaign/latest-complex.stdout.json
 
 clean:
 	@echo "> Cleaning up..."

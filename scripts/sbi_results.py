@@ -64,6 +64,27 @@ PATTERNS = {
 }
 SEQUENCE_MAGIC = b"SBISEQ\x00\x00"
 SEQUENCE_RESULT_KINDS = {"ok", "interesting", "expectation_failed", "match", "divergence", "capability_mismatch"}
+ARGUMENT_KIND_CODES = {
+    "value": "v",
+    "address": "a",
+    "address_low": "l",
+    "address_high": "h",
+    "size": "s",
+    "count": "c",
+    "flags": "f",
+    "hart_id": "i",
+    "hart_mask_address": "m",
+    "suspend_type": "t",
+    "opaque": "o",
+}
+CLASSIFICATION_PRIORITY = {
+    "sanitizer": 0,
+    "crash": 1,
+    "hang": 2,
+    "mismatch": 3,
+    "invalid_input": 4,
+    "ok": 5,
+}
 
 
 def get_extension_name(eid: int) -> str:
@@ -77,6 +98,86 @@ def get_extension_name(eid: int) -> str:
         0x4442434E: "console",
         0x504D55: "pmu",
     }.get(eid, "unknown")
+
+
+def format_hex_u64(value: int) -> str:
+    return f"0x{int(value):X}"
+
+
+def schema_compact_signature(schema_values: list[str]) -> str:
+    return "".join(ARGUMENT_KIND_CODES.get(kind, "v") for kind in schema_values)
+
+
+def nonzero_mask(arg_values: list[int]) -> str:
+    return "".join("1" if value != 0 else "0" for value in arg_values)
+
+
+def address_value_class(value: int) -> str:
+    if value == 0:
+        return "z"
+    if value & 0x7:
+        return "u"
+    if value & 0xFFF == 0:
+        return "p"
+    return "n"
+
+
+def address_mask(schema_values: list[str], arg_values: list[int]) -> str:
+    encoded = []
+    for kind, value in zip(schema_values, arg_values):
+        if kind in ADDRESS_KINDS:
+            encoded.append(address_value_class(value))
+        else:
+            encoded.append("-")
+    return "".join(encoded)
+
+
+def build_legacy_semantic_signature(eid: int, fid: int, schema_values: list[str], arg_values: list[int]) -> str:
+    return (
+        f"call:{format_hex_u64(eid)}:{format_hex_u64(fid)}:"
+        f"schema={schema_compact_signature(schema_values)}:"
+        f"nz={nonzero_mask(arg_values)}:"
+        f"addr={address_mask(schema_values, arg_values)}"
+    )
+
+
+def sequence_step_summary(step: dict) -> str:
+    kind = step.get("kind", "unknown")
+    label = step.get("label", "")
+    if kind == "call":
+        return f"call:{format_hex_u64(step.get('eid', 0))}:{format_hex_u64(step.get('fid', 0))}:{label}"
+    if kind in {"set_target_hart", "set_hart_state"}:
+        return f"{kind}:{step.get('hart_id', '?')}:{label}"
+    if kind == "parse_fdt":
+        return f"parse_fdt:{step.get('object', '')}:{label}"
+    if kind == "busy_wait":
+        return f"busy_wait:{step.get('iterations', 0)}"
+    if kind == "set_platform_fault":
+        return f"set_platform_fault:{step.get('profile', {}).get('mode', '')}"
+    if kind == "set_privilege":
+        return f"set_privilege:{step.get('privilege', '')}"
+    return f"{kind}:{label}"
+
+
+def build_sequence_semantic_signature(steps: list[dict]) -> str:
+    return ";".join(sequence_step_summary(step) for step in steps)
+
+
+def build_sequence_temporal_signature(steps: list[dict]) -> str:
+    material = ";".join(sequence_step_summary(step) for step in steps)
+    digest = hashlib.sha256(material.encode()).hexdigest()[:12]
+    return f"seq:{len(steps)}:{digest}"
+
+
+def stability_details(item: dict, stability: dict | None = None) -> tuple[str, float]:
+    if stability:
+        score = stability.get("stability_score")
+        if score is None:
+            score = stability.get("stable_ratio", 0.0)
+        return stability.get("label", "unknown"), float(score)
+    if item.get("interesting") and item.get("classification") != "hang":
+        return "single_replay", 1.0
+    return "unrated", 0.0
 
 
 def load_sequence_program(path: Path):
@@ -127,6 +228,7 @@ def load_case(path: Path):
         flags.append("unknown_eid")
 
     raw_exec = path.parent / ".raw" / f"{hash_value}.exec"
+    semantic_signature = build_legacy_semantic_signature(eid, fid, schema_values, arg_values)
     return {
         "path": str(path),
         "input_kind": "legacy_call",
@@ -145,6 +247,11 @@ def load_case(path: Path):
         "address_slots": address_slots,
         "nonzero_slots": nonzero_slots,
         "flags": flags,
+        "instruction_signature": None,
+        "semantic_signature": semantic_signature,
+        "temporal_signature": f"single:{format_hex_u64(eid)}:{format_hex_u64(fid)}",
+        "state_signature": None,
+        "memory_signature": None,
     }
 
 
@@ -184,6 +291,7 @@ def load_sequence_case(path: Path):
     impl_hint = env.get("impl_hint")
     if impl_hint:
         flags.append(f"impl_hint:{impl_hint}")
+    semantic_signature = build_sequence_semantic_signature(steps)
     return {
         "path": str(path),
         "input_kind": "sequence",
@@ -204,9 +312,11 @@ def load_sequence_case(path: Path):
         "nonzero_slots": [],
         "flags": flags,
         "impl_hint": impl_hint,
-        "semantic_signature": ";".join(
-            f"{step.get('kind')}:{step.get('label', '')}" for step in steps
-        ),
+        "instruction_signature": None,
+        "semantic_signature": semantic_signature,
+        "temporal_signature": build_sequence_temporal_signature(steps),
+        "state_signature": None,
+        "memory_signature": None,
     }
 
 
@@ -243,6 +353,7 @@ def classify_output(output: str, actual: str, expected: str):
             "notes": ["invalid_exec_input"],
             "classification": "invalid_input",
             "signature": f"invalid_input:{reason}",
+            "instruction_signature": f"invalid_input:{reason}",
             "interesting": False,
         }
 
@@ -277,6 +388,15 @@ def classify_output(output: str, actual: str, expected: str):
         classification = "ok"
 
     if trap:
+        instruction_signature = "trap:" + ":".join(
+            [
+                trap.get("mcause", "?"),
+                trap.get("mepc", "?"),
+                trap.get("mtval", "?"),
+                trap.get("hart_id", "?"),
+                ",".join(signals) or actual,
+            ]
+        )
         signature = "trap:" + ":".join(
             [
                 trap.get("mcause", "?"),
@@ -286,8 +406,10 @@ def classify_output(output: str, actual: str, expected: str):
             ]
         )
     elif signals:
+        instruction_signature = "signals:" + ",".join(sorted(signals))
         signature = "signals:" + ",".join(sorted(signals))
     else:
+        instruction_signature = f"exit:{actual}"
         signature = f"exit:{actual}"
 
     return {
@@ -296,6 +418,7 @@ def classify_output(output: str, actual: str, expected: str):
         "notes": notes,
         "classification": classification,
         "signature": signature,
+        "instruction_signature": instruction_signature,
         "interesting": classification != "ok",
     }
 
@@ -327,6 +450,8 @@ def summarize_triage(cases):
                 "fid": f"0x{rep['fid']:X}",
                 "flags": rep["flags"],
                 "raw_exec_exists": rep["raw_exec_exists"],
+                "semantic_signature": rep.get("semantic_signature"),
+                "temporal_signature": rep.get("temporal_signature"),
             }
             for bucket, rep in sorted(representatives.items())
         },
@@ -356,7 +481,7 @@ def write_triage_markdown(summary, output: Path, label: str):
     lines += ["", "## Representative Buckets", ""]
     for bucket, rep in summary["representatives"].items():
         lines.append(
-            f"- `{bucket}` -> `{rep['path']}` | eid={rep['eid']} fid={rep['fid']} | flags={','.join(rep['flags']) or 'none'} | raw_exec={rep['raw_exec_exists']}"
+            f"- `{bucket}` -> `{rep['path']}` | eid={rep['eid']} fid={rep['fid']} | flags={','.join(rep['flags']) or 'none'} | semantic={rep.get('semantic_signature') or 'none'} | temporal={rep.get('temporal_signature') or 'none'} | raw_exec={rep['raw_exec_exists']}"
         )
     output.write_text("\n".join(lines) + "\n")
 
@@ -518,12 +643,21 @@ def build_replay_result(case: dict, input_path: Path, used_raw_exec: bool, run_r
         "notes": classification["notes"],
         "classification": classification["classification"],
         "signature": classification["signature"],
+        "instruction_signature": classification["instruction_signature"],
         "interesting": classification["interesting"],
         "impl_kind": None,
         "supported_by_target": None,
-        "state_signature": None,
-        "memory_signature": None,
-        "semantic_signature": None,
+        "state_signature": case.get("state_signature"),
+        "memory_signature": case.get("memory_signature"),
+        "semantic_signature": case.get("semantic_signature"),
+        "temporal_signature": case.get("temporal_signature"),
+        "signature_layers": {
+            "instruction": classification["instruction_signature"],
+            "semantic": case.get("semantic_signature"),
+            "temporal": case.get("temporal_signature"),
+            "state": case.get("state_signature"),
+            "memory": case.get("memory_signature"),
+        },
         "log_path": write_replay_log(log_dir, case, run_result["output"]),
         "output_excerpt": run_result["output"][-4000:],
     }
@@ -531,6 +665,11 @@ def build_replay_result(case: dict, input_path: Path, used_raw_exec: bool, run_r
 
 def build_sequence_replay_result(case: dict, input_path: Path, run_result: dict, log_dir: Path | None):
     payload = run_result.get("payload") or {}
+    instruction_signature = payload.get("instruction_signature", payload.get("signature", run_result["actual_kind"]))
+    semantic_signature = payload.get("semantic_signature", case.get("semantic_signature"))
+    temporal_signature = payload.get("temporal_signature", case.get("temporal_signature"))
+    state_signature = payload.get("state_signature", case.get("state_signature"))
+    memory_signature = payload.get("memory_signature", case.get("memory_signature"))
     return {
         "input": str(input_path),
         "input_kind": "sequence",
@@ -549,12 +688,21 @@ def build_sequence_replay_result(case: dict, input_path: Path, run_result: dict,
         "notes": [],
         "classification": payload.get("classification", run_result["actual_kind"]),
         "signature": payload.get("signature", run_result["actual_kind"]),
+        "instruction_signature": instruction_signature,
         "interesting": bool(payload.get("interesting", run_result["actual_kind"] != "ok")),
         "impl_kind": payload.get("impl_kind"),
         "supported_by_target": payload.get("supported_by_target"),
-        "state_signature": payload.get("state_signature"),
-        "memory_signature": payload.get("memory_signature"),
-        "semantic_signature": payload.get("semantic_signature"),
+        "state_signature": state_signature,
+        "memory_signature": memory_signature,
+        "semantic_signature": semantic_signature,
+        "temporal_signature": temporal_signature,
+        "signature_layers": {
+            "instruction": instruction_signature,
+            "semantic": semantic_signature,
+            "temporal": temporal_signature,
+            "state": state_signature,
+            "memory": memory_signature,
+        },
         "step_count": payload.get("step_count"),
         "step_classifications": [step.get("classification") for step in payload.get("steps", [])],
         "log_path": write_replay_log(log_dir, case, run_result["output"]),
@@ -611,6 +759,11 @@ def replay_result_entry(
         "extension": entry.get("extension", "unknown"),
         "eid": entry.get("eid", "0x0"),
         "fid": entry.get("fid", "0x0"),
+        "input_kind": entry.get("input_kind", "legacy_call"),
+        "semantic_signature": entry.get("semantic_signature"),
+        "temporal_signature": entry.get("temporal_signature"),
+        "state_signature": entry.get("state_signature"),
+        "memory_signature": entry.get("memory_signature"),
     }
     run_result = run_helper_input(helper_cmd, target, injector, input_path, timeout_secs, smp)
     return build_replay_result(
@@ -635,16 +788,46 @@ def summarize_bug_report(results, hang_stability=None, hang_minimize=None):
             return None
         return hang_minimize.get("cases_by_hash", {}).get(item.get("hash"))
 
-    def bucket_signature(item: dict):
-        raw_signature = item.get("signature", "unknown")
-        if item.get("classification") != "hang":
-            return raw_signature
+    def resolved_signatures(item: dict):
         stability = hang_stability_entry(item) or {}
         minimized = hang_minimize_entry(item) or {}
-        semantic_signature = minimized.get("semantic_signature")
-        if stability.get("label") == "stable_hang" and semantic_signature:
-            return f"{raw_signature}|semantic:{semantic_signature}"
-        return raw_signature
+        instruction_signature = item.get("instruction_signature") or item.get("signature", "unknown")
+        semantic_signature = minimized.get("semantic_signature") or item.get("semantic_signature")
+        temporal_signature = minimized.get("temporal_signature") or item.get("temporal_signature")
+        state_signature = item.get("state_signature")
+        memory_signature = item.get("memory_signature")
+        stability_label, stability_score = stability_details(item, stability)
+        return {
+            "instruction_signature": instruction_signature,
+            "semantic_signature": semantic_signature,
+            "temporal_signature": temporal_signature,
+            "state_signature": state_signature,
+            "memory_signature": memory_signature,
+            "stability_label": stability_label,
+            "stability_score": stability_score,
+        }
+
+    def bucket_signature(item: dict):
+        layers = resolved_signatures(item)
+        parts = [layers["instruction_signature"]]
+        if layers["semantic_signature"]:
+            parts.append(f"semantic:{layers['semantic_signature']}")
+        if item.get("input_kind") == "sequence" and layers["temporal_signature"]:
+            parts.append(f"temporal:{layers['temporal_signature']}")
+        return "|".join(parts)
+
+    def representative_priority(item: dict):
+        layers = resolved_signatures(item)
+        trap = item.get("trap") or {}
+        return (
+            layers["stability_score"],
+            1 if trap else 0,
+            len(item.get("signals", [])),
+            1 if layers["semantic_signature"] else 0,
+            1 if layers["state_signature"] else 0,
+            1 if layers["memory_signature"] else 0,
+            item.get("hash", ""),
+        )
 
     by_classification = Counter(
         item.get("classification", "unknown") for item in candidates
@@ -666,13 +849,28 @@ def summarize_bug_report(results, hang_stability=None, hang_minimize=None):
         )
         grouped[key].append(item)
 
-    for key, items in sorted(grouped.items()):
-        rep = items[0]
+    ordered_groups = []
+    for key, items in grouped.items():
+        rep = max(items, key=representative_priority)
+        layers = resolved_signatures(rep)
+        ordered_groups.append((key, items, rep, layers))
+
+    ordered_groups.sort(
+        key=lambda entry: (
+            CLASSIFICATION_PRIORITY.get(entry[2].get("classification", "unknown"), 99),
+            -entry[3]["stability_score"],
+            -len(entry[1]),
+            entry[0],
+        )
+    )
+
+    for key, items, rep, layers in ordered_groups:
         buckets[key] = {
             "count": len(items),
             "classification": rep.get("classification"),
             "signature": bucket_signature(rep),
             "raw_signature": rep.get("signature"),
+            "instruction_signature": layers["instruction_signature"],
             "impl_kind": rep.get("impl_kind"),
             "input_kind": rep.get("input_kind"),
             "supported_by_target": rep.get("supported_by_target"),
@@ -687,9 +885,12 @@ def summarize_bug_report(results, hang_stability=None, hang_minimize=None):
             "trap": rep.get("trap"),
             "notes": rep.get("notes", []),
             "log_path": rep.get("log_path"),
-            "state_signature": rep.get("state_signature"),
-            "memory_signature": rep.get("memory_signature"),
-            "semantic_signature": rep.get("semantic_signature"),
+            "state_signature": layers["state_signature"],
+            "memory_signature": layers["memory_signature"],
+            "semantic_signature": layers["semantic_signature"],
+            "temporal_signature": layers["temporal_signature"],
+            "stability_label": layers["stability_label"],
+            "stability_score": layers["stability_score"],
             "output_excerpt": rep.get("output_excerpt", "")[-1200:],
         }
         stability = hang_stability_entry(rep)
@@ -800,8 +1001,9 @@ def write_bug_markdown(summary, output: Path, label: str):
         )
         state_text = bucket.get("state_signature") or "none"
         memory_text = bucket.get("memory_signature") or "none"
+        temporal_text = bucket.get("temporal_signature") or "none"
         lines.append(
-            f"- `{key}` x{bucket['count']} -> `{bucket['input']}` | kind={bucket.get('input_kind', 'legacy_call')} impl={bucket.get('impl_kind') or 'none'} actual={bucket['actual']} expected={bucket['expected']} | signals={','.join(bucket['signals']) or 'none'} | trap={trap_text} | state={state_text} | memory={memory_text} | stability={stability_text} | semantic={semantic_text} | minimized={minimize_text} | log={log_path}"
+            f"- `{key}` x{bucket['count']} -> `{bucket['input']}` | kind={bucket.get('input_kind', 'legacy_call')} impl={bucket.get('impl_kind') or 'none'} actual={bucket['actual']} expected={bucket['expected']} | signals={','.join(bucket['signals']) or 'none'} | trap={trap_text} | instruction={bucket.get('instruction_signature') or bucket.get('raw_signature') or 'none'} | state={state_text} | memory={memory_text} | temporal={temporal_text} | stability={stability_text} score={bucket.get('stability_score', 0.0):.2f} | semantic={semantic_text} | minimized={minimize_text} | log={log_path}"
         )
     output.write_text("\n".join(lines) + "\n")
 

@@ -1,0 +1,15 @@
+[metadata]
+name = "single-hart-fast"
+description = "Low-latency firmware fuzzing profile for single-hart SBI paths."
+
+[firmware]
+duration_secs = 300
+timeout_ms = 100
+smp = 1
+cores = "1"
+replay_timeout_secs = 12
+replay_max_buckets = 64
+hang_stability_attempts = 3
+skip_halt = true
+helper_bin = "target/release/helper"
+fuzzer_bin = "cargo"

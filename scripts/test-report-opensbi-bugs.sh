@@ -144,8 +144,11 @@ rg -n '"label": "stable_hang"' "$json_out" >/dev/null
 rg -n '"minimized_cases": 1' "$json_out" >/dev/null
 rg -n '"unique_semantic_signatures": 1' "$json_out" >/dev/null
 rg -n '"status": "minimized"' "$json_out" >/dev/null
+rg -n '"instruction_signature": "signals:kasan"' "$json_out" >/dev/null
+rg -n '"stability_score": 1.0' "$json_out" >/dev/null
 rg -n 'signals:kasan' "$json_out" >/dev/null
-rg -n 'stability=stable_hang 3/3' "$md_out" >/dev/null
+rg -n 'stability=stable_hang 3/3 score=1.00' "$md_out" >/dev/null
+rg -n 'instruction=signals:kasan' "$md_out" >/dev/null
 rg -n 'semantic=hart1:raw->base_get_impl_id' "$md_out" >/dev/null
 rg -n 'minimized=mini' "$md_out" >/dev/null
 rg -n 'OpenSBI Bug Report' "$md_out" >/dev/null

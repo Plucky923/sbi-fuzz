@@ -1,0 +1,8 @@
+[metadata]
+name = "host-sequence"
+description = "Host-harness sequence replay profile for `.seq` campaigns."
+
+[sequence]
+replay_limit = 64
+timeout_secs = 20
+helper_bin = "target/release/helper"

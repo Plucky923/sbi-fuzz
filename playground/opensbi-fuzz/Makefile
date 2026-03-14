@@ -17,7 +17,7 @@ prepare:
 		(cd output/opensbi && git checkout v1.6) && \
 		cargo helper instrument-kasan output/opensbi && \
 		bash compile-opensbi.sh && \
-		cargo helper generate-seed output/seed && \
+		cargo helper generate-seed output/seed --lock-file ../../config/locks/riscv-sbi-doc.lock && \
 		echo "> Preparation completed"; \
 	else \
 		echo "> Output directory already exists, skipping preparation. If you want to rebuild, run 'make clean' first"; \
@@ -69,7 +69,7 @@ campaign:
 	@echo "> Running automated OpenSBI fuzz campaign..."
 	@if [ ! -d "output" ]; then $(MAKE) prepare; fi
 	@mkdir -p output/campaign
-	python3 ../../scripts/run-sbi-fuzz-campaign.py opensbi output/opensbi/build/platform/generic/firmware/fw_dynamic.bin ../../injector/build/injector.elf output/seed output/result --duration-secs $${DURATION_SECS:-300} --cores $${CORES:-1} --replay-max-buckets $${REPLAY_MAX_BUCKETS:-64} --helper-bin ../../target/release/helper --json-out output/campaign/latest.json > output/campaign/latest.stdout.json
+	python3 ../../scripts/run-sbi-fuzz-campaign.py opensbi output/opensbi/build/platform/generic/firmware/fw_dynamic.bin ../../injector/build/injector.elf output/seed output/result --profile $${PROFILE:-single-hart-fast} --duration-secs $${DURATION_SECS:-300} --cores $${CORES:-1} --replay-max-buckets $${REPLAY_MAX_BUCKETS:-64} --helper-bin ../../target/release/helper --json-out output/campaign/latest.json > output/campaign/latest.stdout.json
 
 clean:
 	@echo "> Cleaning up..."

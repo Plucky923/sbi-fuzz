@@ -1,0 +1,15 @@
+[metadata]
+name = "multi-hart-race"
+description = "Higher-timeout firmware fuzzing profile for HSM/IPI/RFENCE race exploration."
+
+[firmware]
+duration_secs = 300
+timeout_ms = 500
+smp = 4
+cores = "1"
+replay_timeout_secs = 20
+replay_max_buckets = 64
+hang_stability_attempts = 5
+skip_halt = true
+helper_bin = "target/release/helper"
+fuzzer_bin = "cargo"

@@ -18,7 +18,7 @@ prepare:
 		cargo helper instrument-kasan output/opensbi && \
 		(cd output/opensbi && git apply ../../kasan-test.patch) && \
 		bash compile-opensbi.sh && \
-		(cargo helper generate-seed output/seed || (echo "> Seed generation failed, trying fallback from ../opensbi-fuzz/output/seed..." && cp -r ../opensbi-fuzz/output/seed output/seed)) && \
+		(cargo helper generate-seed output/seed --lock-file ../../config/locks/riscv-sbi-doc.lock || (echo "> Seed generation failed, trying fallback from ../opensbi-fuzz/output/seed..." && cp -r ../opensbi-fuzz/output/seed output/seed)) && \
 		echo "> Preparation completed"; \
 	else \
 		echo "> Output directory already exists, skipping preparation. If you want to rebuild, run 'make clean' first"; \
