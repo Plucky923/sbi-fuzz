@@ -1,12 +1,12 @@
 [metadata]
 extension = "rfence"
-note = "Remote fence calls mix hart-mask pointers with address and span arguments."
+note = "Remote fence calls mix hart-mask values with address and span arguments."
 
 # sbi_remote_fence_i: Instruction fence on remote harts
 [[calls]]
 eid = 0x52464E43
 fid = 0x0
-arg0 = "hart_mask_address"  # pointer to hart mask
+arg0 = "hart_mask_address"  # hart mask value
 arg1 = "value"              # hart_mask_base
 arg2 = "value"
 arg3 = "value"
@@ -17,7 +17,7 @@ arg5 = "value"
 [[calls]]
 eid = 0x52464E43
 fid = 0x1
-arg0 = "hart_mask_address"  # pointer to hart mask
+arg0 = "hart_mask_address"  # hart mask value
 arg1 = "value"              # hart_mask_base
 arg2 = "address"            # start_addr
 arg3 = "size"               # size
@@ -28,7 +28,7 @@ arg5 = "value"
 [[calls]]
 eid = 0x52464E43
 fid = 0x2
-arg0 = "hart_mask_address"  # pointer to hart mask
+arg0 = "hart_mask_address"  # hart mask value
 arg1 = "value"              # hart_mask_base
 arg2 = "address"            # start_addr
 arg3 = "size"               # size
@@ -39,7 +39,7 @@ arg5 = "value"
 [[calls]]
 eid = 0x52464E43
 fid = 0x3
-arg0 = "hart_mask_address"  # pointer to hart mask
+arg0 = "hart_mask_address"  # hart mask value
 arg1 = "value"              # hart_mask_base
 arg2 = "address"            # start_addr
 arg3 = "size"               # size
@@ -50,7 +50,7 @@ arg5 = "value"
 [[calls]]
 eid = 0x52464E43
 fid = 0x4
-arg0 = "hart_mask_address"  # pointer to hart mask
+arg0 = "hart_mask_address"  # hart mask value
 arg1 = "value"              # hart_mask_base
 arg2 = "address"            # start_addr
 arg3 = "size"               # size
@@ -61,7 +61,7 @@ arg5 = "value"
 [[calls]]
 eid = 0x52464E43
 fid = 0x5
-arg0 = "hart_mask_address"  # pointer to hart mask
+arg0 = "hart_mask_address"  # hart mask value
 arg1 = "value"              # hart_mask_base
 arg2 = "address"            # start_addr
 arg3 = "size"               # size
@@ -72,7 +72,7 @@ arg5 = "value"
 [[calls]]
 eid = 0x52464E43
 fid = 0x6
-arg0 = "hart_mask_address"  # pointer to hart mask
+arg0 = "hart_mask_address"  # hart mask value
 arg1 = "value"              # hart_mask_base
 arg2 = "address"            # start_addr
 arg3 = "size"               # size

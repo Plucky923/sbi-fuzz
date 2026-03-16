@@ -90,13 +90,13 @@ arg3 = "value"
 arg4 = "value"
 arg5 = "value"
 
-# sbi_pmu_snapshot_get_shmem
+# OpenSBI-specific sbi_pmu_event_get_info
 [[calls]]
 eid = 0x504D55
 fid = 0x8
-arg0 = "address_low"   # shmem_phys_lo - lower 32 bits for output
-arg1 = "address_high"  # shmem_phys_hi - upper 32 bits for output
-arg2 = "count"         # entry count
+arg0 = "value"         # event_idx / implementation-specific selector
+arg1 = "value"
+arg2 = "value"
 arg3 = "value"
 arg4 = "value"
 arg5 = "value"

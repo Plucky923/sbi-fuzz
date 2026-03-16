@@ -244,9 +244,15 @@ impl SemanticMutator {
                 }
             }
             ArgumentKind::HartMaskAddress => {
-                // Hart mask is an address to a mask
+                // Hart mask is a direct bit-mask value.
                 if rng.gen_bool(0.7) {
-                    AddressValue::random(rng).to_u64()
+                    match rng.gen_range(0..5) {
+                        0 => 0,
+                        1 => 1,
+                        2 => 1 << 1,
+                        3 => 1 << 3,
+                        _ => 0xff,
+                    }
                 } else if rng.gen_bool(0.5) {
                     current_value
                 } else {
@@ -277,16 +283,23 @@ impl SemanticMutator {
     /// Mutate input data using schema-aware strategies
     pub fn mutate_input<R: Rng>(&self, input: &mut InputData, rng: &mut R) {
         let schema = input.metadata.schema.unwrap_or_default();
+        let original = input.args.clone();
 
         // Decide how many arguments to mutate (1-3)
         let num_mutations = rng.gen_range(1..=3);
         let mut mutated = 0;
+        let mut attempts = 0;
 
-        while mutated < num_mutations {
+        while mutated < num_mutations && attempts < 24 {
             let arg_index = rng.gen_range(0..6);
             let kind = schema.argument_kind(arg_index);
             let current_value = input.args.get(arg_index);
             let new_value = self.mutate_argument(kind, current_value, rng);
+            attempts += 1;
+
+            if new_value == current_value {
+                continue;
+            }
 
             match arg_index {
                 0 => input.args.arg0 = new_value,
@@ -299,6 +312,16 @@ impl SemanticMutator {
             }
 
             mutated += 1;
+        }
+
+        if input.args.arg0 == original.arg0
+            && input.args.arg1 == original.arg1
+            && input.args.arg2 == original.arg2
+            && input.args.arg3 == original.arg3
+            && input.args.arg4 == original.arg4
+            && input.args.arg5 == original.arg5
+        {
+            input.args.arg0 = original.arg0 ^ 1;
         }
     }
 }
@@ -369,6 +392,8 @@ mod tests {
                 || input.args.arg1 != original.args.arg1
                 || input.args.arg2 != original.args.arg2
                 || input.args.arg3 != original.args.arg3
+                || input.args.arg4 != original.args.arg4
+                || input.args.arg5 != original.args.arg5
         );
     }
 }

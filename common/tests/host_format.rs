@@ -5,7 +5,7 @@ fn sample_host_input(mode: HostHarnessMode) -> HostHarnessInput {
         target_kind: HostTargetKind::RustSbi,
         mode,
         call: HostCall::new(0x4442_434e, 0, [4, 0x8000_1000, 0, 0, 0, 0]),
-        hart_id: 2,
+        hart_id: 37,
         hart_state: HostHartState::Started,
         privilege: HostPrivilegeState::Supervisor,
         memory_regions: vec![HostMemoryRegion {
@@ -35,6 +35,28 @@ fn host_harness_input_round_trip() {
     assert_eq!(decoded, original);
     assert_eq!(decoded.target_kind, HostTargetKind::RustSbi);
     assert_eq!(decoded.hash_string().len(), 8);
+}
+
+#[test]
+fn host_harness_fuzz_bytes_round_trip() {
+    let original = sample_host_input(HostHarnessMode::Ecall);
+    let decoded = HostHarnessInput::from_fuzz_bytes(&original.to_fuzz_bytes());
+
+    assert_eq!(decoded.target_kind, original.target_kind);
+    assert_eq!(decoded.mode, original.mode);
+    assert_eq!(decoded.call, original.call);
+    assert_eq!(decoded.hart_id, original.hart_id);
+    assert_eq!(decoded.hart_state, original.hart_state);
+    assert_eq!(decoded.privilege, original.privilege);
+    assert_eq!(decoded.memory_regions, original.memory_regions);
+}
+
+#[test]
+fn host_harness_fuzz_decode_handles_empty_input() {
+    let decoded = HostHarnessInput::from_fuzz_bytes(&[]);
+    assert_eq!(decoded.mode, HostHarnessMode::Ecall);
+    assert_eq!(decoded.call.extid, 0x10);
+    assert_eq!(decoded.call.fid, 0);
 }
 
 #[test]

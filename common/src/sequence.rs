@@ -169,6 +169,10 @@ impl SequenceProgram {
             .map(|byte| format!("{byte:02x}"))
             .collect::<String>()
     }
+
+    pub fn from_fuzz_bytes(bytes: &[u8], smp: u16) -> Self {
+        sequence_program_from_fuzz_bytes(bytes, smp)
+    }
 }
 
 pub fn sequence_program_to_bytes(program: &SequenceProgram) -> Vec<u8> {
@@ -204,6 +208,169 @@ pub fn sequence_program_from_bytes(bytes: &[u8]) -> Result<SequenceProgram, Stri
         serde_json::from_slice(payload).map_err(|err| format!("parse sequence payload: {err}"))?;
     validate_sequence_program(&program)?;
     Ok(program)
+}
+
+pub fn sequence_program_from_fuzz_bytes(bytes: &[u8], smp: u16) -> SequenceProgram {
+    if bytes.starts_with(SEQUENCE_MAGIC) {
+        if let Ok(program) = sequence_program_from_bytes(bytes) {
+            return program;
+        }
+    }
+
+    let smp = smp.max(1);
+    let mut cursor = SequenceFuzzCursor::new(bytes);
+    let step_budget = usize::from(cursor.read_u16().clamp(1, 32));
+    let memory_count = usize::from(cursor.read_u8().min(8));
+    let mut memory = Vec::with_capacity(memory_count);
+
+    for index in 0..memory_count {
+        let raw_guest_addr = cursor.read_u64();
+        let perm = cursor.read_u8();
+        let mut len = usize::from(cursor.read_u16()).min(256);
+        if len == 0 && index == 0 {
+            len = 16;
+        }
+        let mut region_bytes = cursor.take_vec(len);
+        while region_bytes.len() < len {
+            region_bytes.push((index as u8).wrapping_add(region_bytes.len() as u8));
+        }
+        memory.push(SequenceMemoryObject {
+            id: format!("obj{index}"),
+            slot_offset: (index as u64) * 0x100,
+            guest_addr: Some(match raw_guest_addr {
+                0 => DEFAULT_SEQUENCE_GUEST_BASE + (index as u64 * 0x1000),
+                value if value < 0x1000 => {
+                    DEFAULT_SEQUENCE_GUEST_BASE + (index as u64 * 0x1000) + value * 8
+                }
+                value => value,
+            }),
+            read: perm == 0 || perm & 0b001 != 0,
+            write: perm == 0 || perm & 0b010 != 0,
+            execute: perm & 0b100 != 0,
+            bytes: region_bytes,
+        });
+    }
+
+    let mut steps = Vec::new();
+    let mut call_count = 0_u64;
+    for step_index in 0..step_budget {
+        match cursor.read_u8() % 5 {
+            0 => {
+                let eid = fuzz_sequence_extid(cursor.read_u64());
+                let fid = fuzz_sequence_fid(eid, cursor.read_u64());
+                let mut raw_args = [0_u64; 6];
+                for arg in &mut raw_args {
+                    *arg = cursor.read_u64();
+                }
+                let caller_hart = u64::from(cursor.read_u8()) % u64::from(smp);
+                steps.push(SequenceStep::SetTargetHart {
+                    hart_id: caller_hart,
+                });
+                steps.push(SequenceStep::Call {
+                    label: format!("fuzz-call-{step_index}"),
+                    eid,
+                    fid,
+                    args: fuzz_sequence_args(eid, fid, raw_args, &memory, call_count),
+                    expect: None,
+                });
+                call_count += 1;
+            }
+            1 => steps.push(SequenceStep::SetTargetHart {
+                hart_id: u64::from(cursor.read_u8()) % u64::from(smp),
+            }),
+            2 => steps.push(SequenceStep::SetHartState {
+                hart_id: u64::from(cursor.read_u8()) % u64::from(smp),
+                state: match cursor.read_u8() % 4 {
+                    0 => HostHartState::Unknown,
+                    1 => HostHartState::Started,
+                    2 => HostHartState::Stopped,
+                    _ => HostHartState::Suspended,
+                },
+            }),
+            3 => steps.push(SequenceStep::SetPlatformFault {
+                profile: HostPlatformFaultProfile {
+                    mode: match cursor.read_u8() % 4 {
+                        0 => crate::HostPlatformFaultMode::None,
+                        1 => crate::HostPlatformFaultMode::ReturnSbiError,
+                        2 => crate::HostPlatformFaultMode::ReturnRawError,
+                        _ => crate::HostPlatformFaultMode::OverrideValue,
+                    },
+                    error: cursor.read_i64(),
+                    value: cursor.read_u64(),
+                    duplicate_side_effects: cursor.read_u8() % 2 == 1,
+                },
+            }),
+            _ => steps.push(SequenceStep::BusyWait {
+                iterations: u64::from(cursor.read_u16()),
+            }),
+        }
+    }
+
+    if !steps
+        .iter()
+        .any(|step| matches!(step, SequenceStep::Call { .. } | SequenceStep::ParseFdt { .. }))
+    {
+        steps.push(SequenceStep::Call {
+            label: "fuzz-default".to_string(),
+            eid: if memory.is_empty() { 0x10 } else { 0x4442_434e },
+            fid: 0,
+            args: fuzz_sequence_args(
+                if memory.is_empty() { 0x10 } else { 0x4442_434e },
+                0,
+                [0; 6],
+                &memory,
+                call_count,
+            ),
+            expect: None,
+        });
+    }
+
+    let program = SequenceProgram {
+        metadata: SequenceMetadata {
+            name: "fuzz-sequence".to_string(),
+            source: "structured-fuzz".to_string(),
+            note: format!("len={}", bytes.len()),
+        },
+        env: SequenceEnv {
+            smp,
+            impl_hint: None,
+            platform: "host-harness".to_string(),
+        },
+        memory,
+        steps,
+    };
+
+    if validate_sequence_program(&program).is_ok() {
+        program
+    } else {
+        SequenceProgram {
+            metadata: SequenceMetadata {
+                name: "fuzz-sequence-fallback".to_string(),
+                source: "structured-fuzz".to_string(),
+                note: String::new(),
+            },
+            env: SequenceEnv {
+                smp,
+                impl_hint: None,
+                platform: "host-harness".to_string(),
+            },
+            memory: Vec::new(),
+            steps: vec![SequenceStep::Call {
+                label: "base-get-spec-version".to_string(),
+                eid: 0x10,
+                fid: 0,
+                args: vec![
+                    SequenceArg::Const { value: 0 },
+                    SequenceArg::Const { value: 0 },
+                    SequenceArg::Const { value: 0 },
+                    SequenceArg::Const { value: 0 },
+                    SequenceArg::Const { value: 0 },
+                    SequenceArg::Const { value: 0 },
+                ],
+                expect: None,
+            }],
+        }
+    }
 }
 
 pub fn validate_sequence_program(program: &SequenceProgram) -> Result<(), String> {
@@ -272,6 +439,146 @@ pub fn validate_sequence_program(program: &SequenceProgram) -> Result<(), String
     }
 
     Ok(())
+}
+
+struct SequenceFuzzCursor<'a> {
+    bytes: &'a [u8],
+    offset: usize,
+}
+
+impl<'a> SequenceFuzzCursor<'a> {
+    fn new(bytes: &'a [u8]) -> Self {
+        Self { bytes, offset: 0 }
+    }
+
+    fn read_u8(&mut self) -> u8 {
+        let value = self.bytes.get(self.offset).copied().unwrap_or(0);
+        self.offset = self.offset.saturating_add(1);
+        value
+    }
+
+    fn read_u16(&mut self) -> u16 {
+        let mut raw = [0_u8; 2];
+        let chunk = self.take_slice(2);
+        raw[..chunk.len()].copy_from_slice(chunk);
+        u16::from_le_bytes(raw)
+    }
+
+    fn read_u64(&mut self) -> u64 {
+        let mut raw = [0_u8; 8];
+        let chunk = self.take_slice(8);
+        raw[..chunk.len()].copy_from_slice(chunk);
+        u64::from_le_bytes(raw)
+    }
+
+    fn read_i64(&mut self) -> i64 {
+        let mut raw = [0_u8; 8];
+        let chunk = self.take_slice(8);
+        raw[..chunk.len()].copy_from_slice(chunk);
+        i64::from_le_bytes(raw)
+    }
+
+    fn take_vec(&mut self, len: usize) -> Vec<u8> {
+        self.take_slice(len).to_vec()
+    }
+
+    fn take_slice(&mut self, len: usize) -> &'a [u8] {
+        let start = self.offset.min(self.bytes.len());
+        let end = start.saturating_add(len).min(self.bytes.len());
+        self.offset = end;
+        &self.bytes[start..end]
+    }
+}
+
+fn fuzz_sequence_extid(raw_eid: u64) -> u64 {
+    const KNOWN_EXTENSIONS: [u64; 8] = [
+        0x10,
+        0x5449_4d45,
+        0x735049,
+        0x5246_4e43,
+        0x4853_4d,
+        0x4442_434e,
+        0x5352_5354,
+        0x504d55,
+    ];
+    if raw_eid == 0 {
+        0x10
+    } else if raw_eid < KNOWN_EXTENSIONS.len() as u64 {
+        KNOWN_EXTENSIONS[raw_eid as usize]
+    } else {
+        raw_eid
+    }
+}
+
+fn fuzz_sequence_fid(extid: u64, raw_fid: u64) -> u64 {
+    if raw_fid != 0 {
+        return raw_fid & 0xf;
+    }
+    match extid {
+        0x10 => 0,
+        0x4442_434e => 0,
+        0x4853_4d => 2,
+        0x504d55 => 8,
+        _ => 0,
+    }
+}
+
+fn fuzz_sequence_args(
+    eid: u64,
+    fid: u64,
+    raw_args: [u64; 6],
+    memory: &[SequenceMemoryObject],
+    call_count: u64,
+) -> Vec<SequenceArg> {
+    let mut args = raw_args
+        .into_iter()
+        .map(|value| SequenceArg::Const { value })
+        .collect::<Vec<_>>();
+    if let Some(object) = memory.first() {
+        let object_id = object.id.clone();
+        match (eid, fid) {
+            (0x4442_434e, 0 | 1) => {
+                args[0] = SequenceArg::MemoryLen {
+                    object: object_id.clone(),
+                };
+                args[1] = SequenceArg::MemoryAddrLow {
+                    object: object_id.clone(),
+                };
+                args[2] = SequenceArg::MemoryAddrHigh {
+                    object: object_id,
+                };
+            }
+            (0x504d55, 8) => {
+                args[0] = SequenceArg::MemoryAddrLow {
+                    object: object_id.clone(),
+                };
+                args[1] = SequenceArg::MemoryAddrHigh {
+                    object: object_id,
+                };
+            }
+            _ => {}
+        }
+    }
+
+    if call_count > 0 && raw_args[5] % 2 == 1 {
+        args[5] = SequenceArg::CallResult {
+            call_index: (raw_args[5] % call_count).min(call_count - 1),
+            op_div: 1,
+            op_add: 0,
+            default: 0,
+        };
+    }
+
+    if eid == 0x4853_4d && fid == 0 {
+        if matches!(args[0], SequenceArg::Const { value: 0 }) {
+            args[0] = SequenceArg::Const { value: 1 };
+        }
+        if matches!(args[1], SequenceArg::Const { value: 0 }) {
+            args[1] = SequenceArg::Const { value: 0x8020_0000 };
+        }
+    }
+
+    args
 }
 
 pub fn sequence_program_primary_input(program: &SequenceProgram) -> Option<InputData> {
@@ -907,7 +1214,7 @@ fn semantic_sequence_args_from_input(
         let kind = schema.argument_kind(index);
         let value = input.args.get(index);
         let arg = match kind {
-            ArgumentKind::Address | ArgumentKind::HartMaskAddress => {
+            ArgumentKind::Address => {
                 if value == 0 {
                     SequenceArg::Const { value }
                 } else {
@@ -915,6 +1222,7 @@ fn semantic_sequence_args_from_input(
                     SequenceArg::MemoryAddr { object }
                 }
             }
+            ArgumentKind::HartMaskAddress => SequenceArg::Const { value },
             ArgumentKind::AddressLow => {
                 if value == 0 {
                     pending_split_object = None;
@@ -1000,7 +1308,7 @@ fn semantic_memory_object_for_size(
     let next_kind = schema.argument_kind(next_index);
     if !matches!(
         next_kind,
-        ArgumentKind::Address | ArgumentKind::AddressLow | ArgumentKind::HartMaskAddress
+        ArgumentKind::Address | ArgumentKind::AddressLow
     ) {
         return None;
     }
@@ -1015,7 +1323,6 @@ fn semantic_memory_object_for_size(
 
 fn semantic_memory_bytes(kind: ArgumentKind, index: usize) -> Vec<u8> {
     match kind {
-        ArgumentKind::HartMaskAddress => 0x6_u64.to_le_bytes().to_vec(),
         _ => format!("arg{index}-semantic-buffer").into_bytes(),
     }
 }

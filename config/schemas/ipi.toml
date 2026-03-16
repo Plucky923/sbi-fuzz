@@ -1,6 +1,6 @@
 [metadata]
 extension = "ipi"
-note = "IPI calls are primarily driven by hart-mask shared-memory pointers."
+note = "IPI calls are driven by a hart-mask value plus hart-mask base."
 
 [[calls]]
 eid = 0x735049

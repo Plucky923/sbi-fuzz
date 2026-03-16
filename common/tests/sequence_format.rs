@@ -3,7 +3,8 @@ use common::{
     HostTargetKind, SEQUENCE_MAGIC, SequenceArg, SequenceCallExpectation, SequenceEnv,
     SequenceMemoryObject, SequenceMetadata, SequenceProgram, SequenceStep,
     sequence_program_describe, sequence_program_from_bytes, sequence_program_from_exec,
-    sequence_program_from_semantic_input, sequence_program_primary_input,
+    sequence_program_from_fuzz_bytes, sequence_program_from_semantic_input,
+    sequence_program_primary_input,
     sequence_program_semantic_signature, sequence_program_to_bytes, sequence_program_to_exec,
     validate_sequence_program,
 };
@@ -249,4 +250,27 @@ fn semantic_sequence_builder_keeps_hsm_hart_id_and_address_roles() {
         }
         other => panic!("unexpected step: {other:?}"),
     }
+}
+
+#[test]
+fn sequence_from_fuzz_bytes_produces_valid_program() {
+    let program = sequence_program_from_fuzz_bytes(
+        &[3, 0, 1, 0, 0, 0x20, 0x10, 0, 0, 0, 4, 0, b'p', b'i', b'n', b'g'],
+        4,
+    );
+    validate_sequence_program(&program).expect("fuzz sequence should validate");
+    assert!(!program.steps.is_empty());
+    assert!(
+        program
+            .steps
+            .iter()
+            .any(|step| matches!(step, SequenceStep::Call { .. }))
+    );
+}
+
+#[test]
+fn sequence_from_fuzz_bytes_round_trips_encoded_sequences() {
+    let original = sample_sequence();
+    let decoded = SequenceProgram::from_fuzz_bytes(&sequence_program_to_bytes(&original), 4);
+    assert_eq!(decoded, original);
 }

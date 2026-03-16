@@ -1,0 +1,348 @@
+use crate::{
+    HostEcallReport, HostHarnessInput, HostHarnessMode, HostHarnessReport, HostHarnessResult,
+    HostHartState, SbiError,
+};
+use serde::Serialize;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SpecOracleVerdict {
+    pub passed: bool,
+    pub violations: Vec<SpecViolation>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub enum SpecViolation {
+    UnsupportedExtensionWrongError { eid: u64, got: i64 },
+    InvalidAddressNotRejected { eid: u64, fid: u64, addr: u64, len: u64 },
+    HsmIllegalTransition {
+        from: HostHartState,
+        to: HostHartState,
+        op: &'static str,
+    },
+    PartialIoInconsistent { reported: u64, actual: u64 },
+    WrongErrorCode {
+        expected: i64,
+        got: i64,
+        context: String,
+    },
+    WrongValue {
+        expected: String,
+        got: u64,
+        context: String,
+    },
+    HartMaskInvalidNotRejected { hart_id: u64 },
+    BaseSpecVersionTooLow { got: u64 },
+}
+
+pub fn check_host_report(input: &HostHarnessInput, report: &HostHarnessReport) -> SpecOracleVerdict {
+    let violations = match &report.result {
+        HostHarnessResult::Ecall(ecall) => check_ecall_result(input, ecall),
+        HostHarnessResult::Fdt(_) => Vec::new(),
+    };
+    SpecOracleVerdict {
+        passed: violations.is_empty(),
+        violations,
+    }
+}
+
+pub fn check_ecall_result(input: &HostHarnessInput, report: &HostEcallReport) -> Vec<SpecViolation> {
+    if input.mode == HostHarnessMode::PlatformFault || input.platform_fault.is_active() {
+        return Vec::new();
+    }
+
+    let mut violations = Vec::new();
+    if !is_known_extension(input.call.extid)
+        && report.sbi_error != SbiError::NotSupported.code()
+    {
+        violations.push(SpecViolation::UnsupportedExtensionWrongError {
+            eid: input.call.extid,
+            got: report.sbi_error,
+        });
+    }
+
+    match input.call.extid {
+        0x10 => check_base_rules(input, report, &mut violations),
+        0x4442_434e => check_dbcn_rules(input, report, &mut violations),
+        0x4853_4d => check_hsm_rules(input, report, &mut violations),
+        0x7350_49 | 0x5246_4e43 => check_hart_mask_rules(input, report, &mut violations),
+        0x504d_55 => check_pmu_rules(input, report, &mut violations),
+        _ => {}
+    }
+
+    violations
+}
+
+fn check_base_rules(
+    input: &HostHarnessInput,
+    report: &HostEcallReport,
+    violations: &mut Vec<SpecViolation>,
+) {
+    if input.call.fid > 6 {
+        if report.sbi_error != SbiError::NotSupported.code() {
+            violations.push(SpecViolation::WrongErrorCode {
+                expected: SbiError::NotSupported.code(),
+                got: report.sbi_error,
+                context: format!("base fid {} should be rejected", input.call.fid),
+            });
+        }
+        return;
+    }
+
+    if report.sbi_error != SbiError::Success.code() {
+        violations.push(SpecViolation::WrongErrorCode {
+            expected: SbiError::Success.code(),
+            got: report.sbi_error,
+            context: format!("base fid {} should succeed", input.call.fid),
+        });
+    }
+
+    if input.call.fid == 0 && report.value < 2 {
+        violations.push(SpecViolation::BaseSpecVersionTooLow { got: report.value });
+    }
+
+    if input.call.fid == 3
+        && is_non_legacy_known_extension(input.call.args[0])
+        && report.value == 0
+    {
+        violations.push(SpecViolation::WrongValue {
+            expected: "non-zero".to_string(),
+            got: report.value,
+            context: format!(
+                "probe_extension should report support for eid 0x{:x}",
+                input.call.args[0]
+            ),
+        });
+    }
+}
+
+fn check_dbcn_rules(
+    input: &HostHarnessInput,
+    report: &HostEcallReport,
+    violations: &mut Vec<SpecViolation>,
+) {
+    match input.call.fid {
+        0 | 1 => {
+            let num_bytes = input.call.args[0];
+            let addr = input.call.args[1];
+            let hi = input.call.args[2];
+            let need_read = input.call.fid == 0;
+            let need_write = input.call.fid == 1;
+            let valid = hi == 0
+                && region_covers(
+                    &input.memory_regions,
+                    addr,
+                    num_bytes,
+                    need_read,
+                    need_write,
+                );
+            if !valid && report.sbi_error == SbiError::Success.code() {
+                violations.push(SpecViolation::InvalidAddressNotRejected {
+                    eid: input.call.extid,
+                    fid: input.call.fid,
+                    addr,
+                    len: num_bytes,
+                });
+            } else if !valid && report.sbi_error != SbiError::InvalidParam.code() {
+                violations.push(SpecViolation::WrongErrorCode {
+                    expected: SbiError::InvalidParam.code(),
+                    got: report.sbi_error,
+                    context: format!(
+                        "dbcn fid {} should reject invalid address range",
+                        input.call.fid
+                    ),
+                });
+            }
+            if report.sbi_error == SbiError::Success.code() && report.value > num_bytes {
+                violations.push(SpecViolation::PartialIoInconsistent {
+                    reported: report.value,
+                    actual: num_bytes,
+                });
+            }
+        }
+        2 => {
+            if report.sbi_error == SbiError::Success.code() && report.value != 0 {
+                violations.push(SpecViolation::PartialIoInconsistent {
+                    reported: report.value,
+                    actual: 0,
+                });
+            }
+        }
+        _ => {}
+    }
+}
+
+fn check_hsm_rules(
+    input: &HostHarnessInput,
+    report: &HostEcallReport,
+    violations: &mut Vec<SpecViolation>,
+) {
+    match input.call.fid {
+        0 if input.hart_state == HostHartState::Started => {
+            if !matches!(
+                report.sbi_error,
+                value if value == SbiError::AlreadyAvailable.code()
+                    || value == SbiError::AlreadyStarted.code()
+            ) {
+                violations.push(SpecViolation::WrongErrorCode {
+                    expected: SbiError::AlreadyAvailable.code(),
+                    got: report.sbi_error,
+                    context: "hart_start on started hart".to_string(),
+                });
+            }
+        }
+        1 if input.hart_state == HostHartState::Stopped => {
+            if report.sbi_error != SbiError::AlreadyStopped.code() {
+                violations.push(SpecViolation::HsmIllegalTransition {
+                    from: HostHartState::Stopped,
+                    to: HostHartState::Stopped,
+                    op: "hart_stop",
+                });
+            }
+        }
+        2 if input.call.args[0] >= MAX_TRACKED_HARTS => {
+            if report.sbi_error != SbiError::InvalidParam.code() {
+                violations.push(SpecViolation::WrongErrorCode {
+                    expected: SbiError::InvalidParam.code(),
+                    got: report.sbi_error,
+                    context: format!(
+                        "hart_get_status should reject invalid hart {}",
+                        input.call.args[0]
+                    ),
+                });
+            }
+        }
+        3 if input.hart_state != HostHartState::Started => {
+            let suspend_type = input.call.args[0];
+            let suspend_type_invalid = suspend_type & !0x8000_0000 != 0;
+            if suspend_type_invalid && report.sbi_error != SbiError::InvalidParam.code() {
+                violations.push(SpecViolation::WrongErrorCode {
+                    expected: SbiError::InvalidParam.code(),
+                    got: report.sbi_error,
+                    context: "hart_suspend with invalid suspend_type".to_string(),
+                });
+            }
+        }
+        _ => {}
+    }
+}
+
+fn check_hart_mask_rules(
+    input: &HostHarnessInput,
+    report: &HostEcallReport,
+    violations: &mut Vec<SpecViolation>,
+) {
+    if report.sbi_error == SbiError::NotSupported.code() {
+        return;
+    }
+
+    let hart_mask_base = input.call.args[1];
+    if hart_mask_base == u64::MAX {
+        if report.sbi_error == SbiError::InvalidParam.code() {
+            violations.push(SpecViolation::WrongErrorCode {
+                expected: SbiError::Success.code(),
+                got: report.sbi_error,
+                context: "hart_mask_base=-1 should mean all harts".to_string(),
+            });
+        }
+        return;
+    }
+}
+
+fn check_pmu_rules(
+    input: &HostHarnessInput,
+    report: &HostEcallReport,
+    violations: &mut Vec<SpecViolation>,
+) {
+    if report.sbi_error == SbiError::NotSupported.code() {
+        return;
+    }
+
+    match input.call.fid {
+        0 => {
+            if report.sbi_error != SbiError::Success.code() {
+                violations.push(SpecViolation::WrongErrorCode {
+                    expected: SbiError::Success.code(),
+                    got: report.sbi_error,
+                    context: "pmu num_counters should succeed".to_string(),
+                });
+            }
+        }
+        1 | 5 | 6 => {
+            let counter_idx = input.call.args[0];
+            if counter_idx >= PMU_COUNTER_COUNT_HINT
+                && report.sbi_error != SbiError::InvalidParam.code()
+            {
+                violations.push(SpecViolation::WrongErrorCode {
+                    expected: SbiError::InvalidParam.code(),
+                    got: report.sbi_error,
+                    context: format!("pmu counter index {} should be rejected", counter_idx),
+                });
+            }
+        }
+        7 => {
+            let addr = join_split_address(input.call.args[0], input.call.args[1]);
+            let len = 8;
+            if addr != 0
+                && !region_covers(&input.memory_regions, addr, len, true, false)
+                && report.sbi_error == SbiError::Success.code()
+            {
+                violations.push(SpecViolation::InvalidAddressNotRejected {
+                    eid: input.call.extid,
+                    fid: input.call.fid,
+                    addr,
+                    len,
+                });
+            }
+        }
+        _ => {}
+    }
+}
+
+fn is_known_extension(extid: u64) -> bool {
+    matches!(
+        extid,
+        0x0..=0xF
+            | 0x10
+            | 0x5449_4d45
+            | 0x735049
+            | 0x5246_4e43
+            | 0x4853_4d
+            | 0x4442_434e
+            | 0x5352_5354
+            | 0x504d55
+    )
+}
+
+fn is_non_legacy_known_extension(extid: u64) -> bool {
+    is_known_extension(extid) && !matches!(extid, 0x0..=0xF)
+}
+
+const MAX_TRACKED_HARTS: u64 = 64;
+const PMU_COUNTER_COUNT_HINT: u64 = 4;
+
+fn join_split_address(low: u64, high: u64) -> u64 {
+    ((high & u64::from(u32::MAX)) << 32) | (low & u64::from(u32::MAX))
+}
+
+
+fn region_covers(
+    regions: &[crate::HostMemoryRegion],
+    addr: u64,
+    len: u64,
+    need_read: bool,
+    need_write: bool,
+) -> bool {
+    let Some(end) = addr.checked_add(len) else {
+        return false;
+    };
+
+    regions.iter().any(|region| {
+        let Some(region_end) = region.guest_addr.checked_add(region.bytes.len() as u64) else {
+            return false;
+        };
+        addr >= region.guest_addr
+            && end <= region_end
+            && (!need_read || region.read)
+            && (!need_write || region.write)
+    })
+}

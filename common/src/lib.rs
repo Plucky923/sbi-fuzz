@@ -5,18 +5,28 @@ use std::num::ParseIntError;
 use std::path::Path;
 
 mod coverage;
+mod diff_policy;
 mod exec;
+mod hsm_tracker;
 mod host;
+mod memory_oracle;
 mod schema_registry;
 mod semantic_mutation;
 mod sequence;
+mod sequence_mutation;
+mod spec_oracle;
 
 pub use coverage::*;
+pub use diff_policy::*;
 pub use exec::*;
+pub use hsm_tracker::*;
 pub use host::*;
+pub use memory_oracle::*;
 pub use schema_registry::*;
 pub use semantic_mutation::*;
 pub use sequence::*;
+pub use sequence_mutation::*;
+pub use spec_oracle::*;
 
 /// Represents the complete input data structure for SBI calls
 /// Contains both metadata and arguments
@@ -371,9 +381,7 @@ pub fn generate_seed_variants(eid: u64, fid: u64, source_prefix: &str) -> Vec<Se
 
 fn seed_variant_candidates(kind: ArgumentKind) -> &'static [(&'static str, u64)] {
     match kind {
-        ArgumentKind::Address | ArgumentKind::HartMaskAddress => {
-            semantic_argument_named_candidates(kind)
-        }
+        ArgumentKind::Address | ArgumentKind::HartMaskAddress => semantic_argument_named_candidates(kind),
         ArgumentKind::AddressLow => semantic_argument_named_candidates(kind),
         ArgumentKind::AddressHigh => &[],
         ArgumentKind::Size => semantic_argument_named_candidates(kind),
@@ -387,9 +395,8 @@ fn seed_variant_candidates(kind: ArgumentKind) -> &'static [(&'static str, u64)]
 
 pub fn semantic_argument_values(kind: ArgumentKind) -> &'static [u64] {
     match kind {
-        ArgumentKind::Address | ArgumentKind::HartMaskAddress => {
-            &[START_ADDRESS, START_ADDRESS + 1, END_ADDRESS]
-        }
+        ArgumentKind::Address => &[START_ADDRESS, START_ADDRESS + 1, END_ADDRESS],
+        ArgumentKind::HartMaskAddress => &[0, 1, 1 << 3, 0xff],
         ArgumentKind::AddressLow => &[START_ADDRESS, START_ADDRESS + 1],
         ArgumentKind::AddressHigh => &[],
         ArgumentKind::Size => &[1, PAGE_SIZE],
@@ -403,10 +410,16 @@ pub fn semantic_argument_values(kind: ArgumentKind) -> &'static [u64] {
 
 pub fn semantic_argument_named_candidates(kind: ArgumentKind) -> &'static [(&'static str, u64)] {
     match kind {
-        ArgumentKind::Address | ArgumentKind::HartMaskAddress => &[
+        ArgumentKind::Address => &[
             ("guest", START_ADDRESS),
             ("unaligned", START_ADDRESS + 1),
             ("edge", END_ADDRESS),
+        ],
+        ArgumentKind::HartMaskAddress => &[
+            ("empty", 0),
+            ("hart0", 1),
+            ("hart3", 1 << 3),
+            ("dense", 0xff),
         ],
         ArgumentKind::AddressLow => &[
             ("guest-low", START_ADDRESS),
@@ -550,6 +563,30 @@ pub fn builtin_call_schema(eid: u64, fid: u64) -> CallSchema {
             ArgumentKind::Value,
             ArgumentKind::Value,
         ),
+        (0x735049, 0) => CallSchema::new(
+            ArgumentKind::HartMaskAddress,
+            ArgumentKind::Value,
+            ArgumentKind::Value,
+            ArgumentKind::Value,
+            ArgumentKind::Value,
+            ArgumentKind::Value,
+        ),
+        (0x52464E43, 0) => CallSchema::new(
+            ArgumentKind::HartMaskAddress,
+            ArgumentKind::Value,
+            ArgumentKind::Value,
+            ArgumentKind::Value,
+            ArgumentKind::Value,
+            ArgumentKind::Value,
+        ),
+        (0x52464E43, 1 | 2 | 3 | 4 | 5 | 6) => CallSchema::new(
+            ArgumentKind::HartMaskAddress,
+            ArgumentKind::Value,
+            ArgumentKind::Address,
+            ArgumentKind::Size,
+            ArgumentKind::Value,
+            ArgumentKind::Value,
+        ),
         (0x4442434E, 0) => CallSchema::new(
             ArgumentKind::Size,
             ArgumentKind::AddressLow,
@@ -566,10 +603,10 @@ pub fn builtin_call_schema(eid: u64, fid: u64) -> CallSchema {
             ArgumentKind::AddressHigh,
             ArgumentKind::Value,
         ),
-        (0x504D55, 0x8) => CallSchema::new(
+        (0x504D55, 0x7) => CallSchema::new(
             ArgumentKind::AddressLow,
             ArgumentKind::AddressHigh,
-            ArgumentKind::Count,
+            ArgumentKind::Flags,
             ArgumentKind::Value,
             ArgumentKind::Value,
             ArgumentKind::Value,
@@ -612,7 +649,8 @@ pub fn fix_input_args(mut data: InputData) -> InputData {
         let value = data.args.get(index);
         let normalized = match schema.argument_kind(index) {
             ArgumentKind::Value | ArgumentKind::Opaque => value,
-            ArgumentKind::Address | ArgumentKind::HartMaskAddress => normalize_address(value),
+            ArgumentKind::Address => normalize_address(value),
+            ArgumentKind::HartMaskAddress => normalize_hart_mask(value),
             ArgumentKind::AddressLow => normalize_address_low(value),
             ArgumentKind::AddressHigh => 0,
             ArgumentKind::Size => normalize_size(value),
@@ -701,6 +739,11 @@ fn normalize_flags(value: u64) -> u64 {
 
 fn normalize_hart_id(value: u64) -> u64 {
     let candidates = [0, 1, 2, 3, 4, 7, u64::MAX];
+    choose_interesting(value, &candidates)
+}
+
+fn normalize_hart_mask(value: u64) -> u64 {
+    let candidates = [0, 1, 1 << 1, 1 << 3, 0b11, 0xff, 1 << 31, 1 << 63];
     choose_interesting(value, &candidates)
 }
 
