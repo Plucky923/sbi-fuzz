@@ -10,6 +10,11 @@ pub const SBI_ORACLE_BUFFER_WORDS: usize = 9;
 pub const EXEC_ORACLE_FAILURE_CODE: u64 = 0x5342_494f_5243_4c45;
 pub const EXEC_ORACLE_KIND_HSM_HART0_STATUS: u64 = 1;
 pub const EXEC_ORACLE_KIND_PURE_CALL_MISMATCH: u64 = 2;
+pub const EXEC_ORACLE_KIND_DBCN_PARTIAL_OVERFLOW: u64 = 3;
+pub const EXEC_ORACLE_KIND_DBCN_INVALID_NOT_REJECTED: u64 = 4;
+pub const EXEC_ORACLE_KIND_HSM_ILLEGAL_TRANSITION: u64 = 5;
+pub const EXEC_ORACLE_KIND_UNSUPPORTED_WRONG_ERROR: u64 = 6;
+pub const EXEC_ORACLE_KIND_HARTMASK_INVALID_ACCEPTED: u64 = 7;
 pub const EXEC_PROP_KIND_SHIFT: u64 = 56;
 pub const EXEC_PROP_VALUE_MASK: u64 = (1_u64 << EXEC_PROP_KIND_SHIFT) - 1;
 pub const EXEC_PROP_TARGET_HART: u64 = 1;
@@ -300,6 +305,39 @@ pub fn format_exec_oracle_failure(failure: &ExecOracleFailure) -> String {
             failure.expected_error,
             failure.expected_value
         ),
+        EXEC_ORACLE_KIND_DBCN_PARTIAL_OVERFLOW => format!(
+            "oracle=dbcn_partial_overflow instr={} requested=0x{:x} reported=0x{:x}",
+            failure.instr_index,
+            failure.arg0,
+            failure.observed_value
+        ),
+        EXEC_ORACLE_KIND_DBCN_INVALID_NOT_REJECTED => format!(
+            "oracle=dbcn_invalid_not_rejected instr={} addr=0x{:x} len=0x{:x} observed_error=0x{:x}",
+            failure.instr_index,
+            failure.arg0,
+            failure.arg1,
+            failure.observed_error
+        ),
+        EXEC_ORACLE_KIND_HSM_ILLEGAL_TRANSITION => format!(
+            "oracle=hsm_illegal_transition instr={} hart=0x{:x} observed_error=0x{:x} expected_error=0x{:x}",
+            failure.instr_index,
+            failure.arg0,
+            failure.observed_error,
+            failure.expected_error
+        ),
+        EXEC_ORACLE_KIND_UNSUPPORTED_WRONG_ERROR => format!(
+            "oracle=unsupported_wrong_error instr={} eid=0x{:x} observed_error=0x{:x} expected_error=0x{:x}",
+            failure.instr_index,
+            failure.arg0,
+            failure.observed_error,
+            failure.expected_error
+        ),
+        EXEC_ORACLE_KIND_HARTMASK_INVALID_ACCEPTED => format!(
+            "oracle=hartmask_invalid_accepted instr={} hart_mask_base=0x{:x} observed_error=0x{:x}",
+            failure.instr_index,
+            failure.arg0,
+            failure.observed_error
+        ),
         _ => format!(
             "oracle=unknown kind={} instr={} arg0=0x{:x} arg1=0x{:x} observed_error=0x{:x} observed_value=0x{:x} expected_error=0x{:x} expected_value=0x{:x}",
             failure.kind,
@@ -556,10 +594,12 @@ pub fn exec_program_from_bytes(bytes: &[u8]) -> Result<ExecProgram, String> {
     let mut pos = EXEC_MAGIC.len();
     let declared_call_count = read_varint(bytes, &mut pos)? as usize;
     let mut instructions = Vec::new();
+    let mut saw_eof = false;
 
     while pos < bytes.len() {
         let opcode = read_varint(bytes, &mut pos)?;
         if opcode == EXEC_INSTR_EOF {
+            saw_eof = true;
             break;
         }
 
@@ -600,6 +640,10 @@ pub fn exec_program_from_bytes(bytes: &[u8]) -> Result<ExecProgram, String> {
             }
         };
         instructions.push(instr);
+    }
+
+    if !saw_eof {
+        return Err("missing exec EOF instruction".to_string());
     }
 
     let program = ExecProgram { instructions };
@@ -707,10 +751,34 @@ pub fn exec_program_describe(program: &ExecProgram) -> String {
                     "[{index}] call id={call_id} name={desc} copyout=0x{copyout_index:x} nargs={}",
                     args.len()
                 ));
+                for (arg_index, arg) in args.iter().enumerate() {
+                    lines.push(format!(
+                        "  arg[{arg_index}] = {}",
+                        format_exec_arg(arg)
+                    ));
+                }
             }
         }
     }
     lines.join("\n")
+}
+
+fn format_exec_arg(arg: &ExecArg) -> String {
+    match arg {
+        ExecArg::Const { size, value } => format!("const(size={size}, value=0x{value:x})"),
+        ExecArg::Addr32 { offset } => format!("addr32(offset=0x{offset:x})"),
+        ExecArg::Addr64 { offset } => format!("addr64(offset=0x{offset:x})"),
+        ExecArg::Result {
+            size,
+            index,
+            op_div,
+            op_add,
+            default,
+        } => format!(
+            "result(size={size}, index={index}, op_div={op_div}, op_add={op_add}, default=0x{default:x})"
+        ),
+        ExecArg::Data(data) => format!("data(len={})", data.len()),
+    }
 }
 
 fn exec_call_to_input(call_id: u64, args: &[ExecArg]) -> Option<InputData> {

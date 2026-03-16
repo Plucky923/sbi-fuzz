@@ -240,6 +240,27 @@ fn malformed_exec_bytes_are_rejected() {
             .expect_err("fixed call with zero args should fail")
             .contains("unexpected arg count")
     );
+
+    let mut missing_eof = exec_program_to_bytes(&ExecProgram {
+        instructions: vec![ExecInstr::Call {
+            call_id: 1,
+            copyout_index: EXEC_NO_COPYOUT,
+            args: vec![
+                ExecArg::Const { size: 8, value: 1 },
+                ExecArg::Const { size: 8, value: 0 },
+                ExecArg::Const { size: 8, value: 0 },
+                ExecArg::Const { size: 8, value: 0 },
+                ExecArg::Const { size: 8, value: 0 },
+                ExecArg::Const { size: 8, value: 0 },
+            ],
+        }],
+    });
+    missing_eof.pop();
+    assert!(
+        exec_program_from_bytes(&missing_eof)
+            .expect_err("missing eof should fail")
+            .contains("missing exec EOF instruction")
+    );
 }
 
 #[test]

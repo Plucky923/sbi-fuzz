@@ -55,6 +55,11 @@ int __attribute__((noinline)) BREAKPOINT() {
 #define EXEC_ORACLE_FAILURE_CODE 0x5342494f52434c45ULL
 #define EXEC_ORACLE_KIND_HSM_HART0_STATUS 1
 #define EXEC_ORACLE_KIND_PURE_CALL_MISMATCH 2
+#define EXEC_ORACLE_KIND_DBCN_PARTIAL_OVERFLOW 3
+#define EXEC_ORACLE_KIND_DBCN_INVALID_NOT_REJECTED 4
+#define EXEC_ORACLE_KIND_HSM_ILLEGAL_TRANSITION 5
+#define EXEC_ORACLE_KIND_UNSUPPORTED_WRONG_ERROR 6
+#define EXEC_ORACLE_KIND_HARTMASK_INVALID_ACCEPTED 7
 
 #define EXEC_NO_COPYOUT ((uint64_t)-1)
 #define DISPATCH_TIMEOUT_ITERS (1 << 24)
@@ -70,6 +75,11 @@ int __attribute__((noinline)) BREAKPOINT() {
 #define SBI_EXT_BASE_GET_MARCHID 5
 #define SBI_EXT_BASE_GET_MIMPID 6
 #define SBI_HSM_STATE_STARTED 0
+#define SBI_ERR_NOT_SUPPORTED ((uint64_t)-2)
+#define SBI_ERR_ALREADY_AVAILABLE ((uint64_t)-6)
+
+static volatile uint8_t ORACLE_COVERAGE[32] __attribute__((section(".sbifuzz_shmem"))) = {};
+#define ORACLE_COVER(id) do { if ((id) < 32) ORACLE_COVERAGE[(id)] = 1; } while (0)
 
 typedef struct {
     uint8_t valid;
@@ -212,9 +222,27 @@ static int is_oracle_pure_call(uint64_t eid, uint64_t fid) {
     }
 }
 
+static int is_known_sbi_extension(uint64_t eid) {
+    switch (eid) {
+    case 0x0 ... 0xF:
+    case 0x10:
+    case 0x54494D45:
+    case 0x735049:
+    case 0x52464E43:
+    case 0x48534D:
+    case 0x53525354:
+    case 0x4442434E:
+    case 0x504D55:
+        return 1;
+    default:
+        return 0;
+    }
+}
+
 static void record_oracle_failure(uint64_t kind, uint64_t instr_index, uint64_t arg0,
     uint64_t arg1, uint64_t observed_error, uint64_t observed_value,
     uint64_t expected_error, uint64_t expected_value) {
+    ORACLE_COVER(kind);
     SBI_ORACLE_FAILURE_BUFFER[0] = 1;
     SBI_ORACLE_FAILURE_BUFFER[1] = kind;
     SBI_ORACLE_FAILURE_BUFFER[2] = instr_index;
@@ -248,7 +276,7 @@ static int check_oracles(uint64_t instr_index, uint64_t caller_hart, uint64_t ei
     }
 
     if (!is_oracle_pure_call(eid, fid) || ret.error != 0) {
-        return 0;
+        goto extension_oracles;
     }
 
     uint64_t args[6] = {a0, a1, a2, a3, a4, a5};
@@ -301,6 +329,85 @@ static int check_oracles(uint64_t instr_index, uint64_t caller_hart, uint64_t ei
         PURE_CALL_RECORDS[free_slot].error = ret.error;
         PURE_CALL_RECORDS[free_slot].value = ret.value;
     }
+extension_oracles:
+    if (eid == 0x4442434E && fid == 0) {
+        ORACLE_COVER(EXEC_ORACLE_KIND_DBCN_PARTIAL_OVERFLOW);
+        if (ret.error == 0 && ret.value > a0) {
+            record_oracle_failure(
+                EXEC_ORACLE_KIND_DBCN_PARTIAL_OVERFLOW,
+                instr_index,
+                a0,
+                a1,
+                ret.error,
+                ret.value,
+                0,
+                a0
+            );
+            return 1;
+        }
+        if (a2 == 0 && a0 != 0 && ret.error == 0 && a1 == 0) {
+            record_oracle_failure(
+                EXEC_ORACLE_KIND_DBCN_INVALID_NOT_REJECTED,
+                instr_index,
+                a1,
+                a0,
+                ret.error,
+                ret.value,
+                (uint64_t)-3,
+                0
+            );
+            return 1;
+        }
+    }
+
+    if (eid == SBI_EXT_HSM && fid == SBI_EXT_HSM_HART_START && a0 == 0 && ret.error == 0) {
+        ORACLE_COVER(EXEC_ORACLE_KIND_HSM_ILLEGAL_TRANSITION);
+        record_oracle_failure(
+            EXEC_ORACLE_KIND_HSM_ILLEGAL_TRANSITION,
+            instr_index,
+            a0,
+            caller_hart,
+            ret.error,
+            ret.value,
+            SBI_ERR_ALREADY_AVAILABLE,
+            0
+        );
+        return 1;
+    }
+
+    if (!is_known_sbi_extension(eid) && ret.error != SBI_ERR_NOT_SUPPORTED) {
+        ORACLE_COVER(EXEC_ORACLE_KIND_UNSUPPORTED_WRONG_ERROR);
+        record_oracle_failure(
+            EXEC_ORACLE_KIND_UNSUPPORTED_WRONG_ERROR,
+            instr_index,
+            eid,
+            fid,
+            ret.error,
+            ret.value,
+            SBI_ERR_NOT_SUPPORTED,
+            0
+        );
+        return 1;
+    }
+
+    if ((eid == 0x735049 || eid == 0x52464E43) &&
+        a1 != (uint64_t)-1 &&
+        a1 >= MAX_HARTS &&
+        ret.error == 0) {
+        ORACLE_COVER(EXEC_ORACLE_KIND_HARTMASK_INVALID_ACCEPTED);
+        record_oracle_failure(
+            EXEC_ORACLE_KIND_HARTMASK_INVALID_ACCEPTED,
+            instr_index,
+            a1,
+            a0,
+            ret.error,
+            ret.value,
+            (uint64_t)-3,
+            0
+        );
+        return 1;
+    }
+
     return 0;
 }
 
