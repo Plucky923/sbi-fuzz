@@ -1,0 +1,28 @@
+{
+  "target_kind": "rust_sbi",
+  "mode": "ecall",
+  "call": {
+    "extid": 1414090053,
+    "fid": 0,
+    "args": [
+      305419896,
+      0,
+      0,
+      0,
+      0,
+      0
+    ]
+  },
+  "hart_id": 0,
+  "hart_state": "started",
+  "privilege": "supervisor",
+  "memory_regions": [],
+  "platform_fault": {
+    "mode": "none",
+    "error": 0,
+    "value": 0,
+    "duplicate_side_effects": false
+  },
+  "fdt_blob": [],
+  "label": "timer-set-timer"
+}

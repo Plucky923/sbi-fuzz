@@ -1,0 +1,85 @@
+{
+  "metadata": {
+    "name": "shared-schema-hsm-hart-suspend-arg1-edge",
+    "source": "generated-schema-shared-schema-hsm-hart-suspend-3-arg1-edge",
+    "note": "Schema-driven HSM hart-suspend variants with explicit hart switching. Variant: arg1-edge"
+  },
+  "env": {
+    "smp": 4,
+    "platform": ""
+  },
+  "memory": [
+    {
+      "id": "arg1_mem",
+      "slot_offset": 256,
+      "guest_addr": 2415919103,
+      "read": true,
+      "write": true,
+      "execute": false,
+      "bytes": [
+        97,
+        114,
+        103,
+        49,
+        45,
+        115,
+        101,
+        109,
+        97,
+        110,
+        116,
+        105,
+        99,
+        45,
+        98,
+        117,
+        102,
+        102,
+        101,
+        114
+      ]
+    }
+  ],
+  "steps": [
+    {
+      "kind": "set_target_hart",
+      "hart_id": 2
+    },
+    {
+      "kind": "busy_wait",
+      "iterations": 512
+    },
+    {
+      "kind": "call",
+      "label": "hsm",
+      "eid": 4739917,
+      "fid": 3,
+      "args": [
+        {
+          "kind": "const",
+          "value": 0
+        },
+        {
+          "kind": "memory_addr",
+          "object": "arg1_mem"
+        },
+        {
+          "kind": "const",
+          "value": 0
+        },
+        {
+          "kind": "const",
+          "value": 0
+        },
+        {
+          "kind": "const",
+          "value": 0
+        },
+        {
+          "kind": "const",
+          "value": 0
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,59 @@
+[package]
+name = "host_harness-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[workspace]
+members = ["."]
+
+[dependencies]
+common = { path = "../../common" }
+host_harness = { path = ".." }
+libfuzzer-sys = "0.4"
+rand = "0.8"
+
+[[bin]]
+name = "fuzz_harness_smoke"
+path = "fuzz_targets/fuzz_harness_smoke.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_ecall_opensbi"
+path = "fuzz_targets/fuzz_ecall_opensbi.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_ecall_rustsbi"
+path = "fuzz_targets/fuzz_ecall_rustsbi.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_sequence_both"
+path = "fuzz_targets/fuzz_sequence_both.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_diff_ecall"
+path = "fuzz_targets/fuzz_diff_ecall.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_diff_sequence"
+path = "fuzz_targets/fuzz_diff_sequence.rs"
+test = false
+doc = false
+bench = false

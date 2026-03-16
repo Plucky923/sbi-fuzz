@@ -1,0 +1,66 @@
+{
+  "metadata": {
+    "name": "shared-console-write-buffer",
+    "source": "generated",
+    "note": "Use an explicit shared buffer so address-sensitive extensions get memory-aware arguments."
+  },
+  "env": {
+    "smp": 1,
+    "platform": ""
+  },
+  "memory": [
+    {
+      "id": "console_buf",
+      "slot_offset": 64,
+      "guest_addr": 2147491904,
+      "read": true,
+      "write": true,
+      "execute": false,
+      "bytes": [
+        112,
+        105,
+        110,
+        103
+      ]
+    }
+  ],
+  "steps": [
+    {
+      "kind": "call",
+      "label": "console-write",
+      "eid": 1145193294,
+      "fid": 0,
+      "args": [
+        {
+          "kind": "memory_len",
+          "object": "console_buf"
+        },
+        {
+          "kind": "memory_addr_low",
+          "object": "console_buf"
+        },
+        {
+          "kind": "memory_addr_high",
+          "object": "console_buf"
+        },
+        {
+          "kind": "const",
+          "value": 0
+        },
+        {
+          "kind": "const",
+          "value": 0
+        },
+        {
+          "kind": "const",
+          "value": 0
+        }
+      ],
+      "expect": {
+        "sbi_error": 0,
+        "extension_found": true,
+        "classification": "ok"
+      }
+    }
+  ]
+}

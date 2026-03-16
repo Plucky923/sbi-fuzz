@@ -1,0 +1,28 @@
+{
+  "target_kind": "rust_sbi",
+  "mode": "ecall",
+  "call": {
+    "extid": 3735928559,
+    "fid": 85,
+    "args": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6
+    ]
+  },
+  "hart_id": 0,
+  "hart_state": "started",
+  "privilege": "supervisor",
+  "memory_regions": [],
+  "platform_fault": {
+    "mode": "none",
+    "error": 0,
+    "value": 0,
+    "duplicate_side_effects": false
+  },
+  "fdt_blob": [],
+  "label": "unknown-extension"
+}

@@ -1,0 +1,126 @@
+{
+  "metadata": {
+    "name": "shared-base-hsm-status",
+    "source": "generated",
+    "note": "Probe HSM and query hart0 status across both implementations."
+  },
+  "env": {
+    "smp": 1,
+    "platform": ""
+  },
+  "memory": [],
+  "steps": [
+    {
+      "kind": "call",
+      "label": "base-get-spec-version",
+      "eid": 16,
+      "fid": 0,
+      "args": [
+        {
+          "kind": "const",
+          "value": 0
+        },
+        {
+          "kind": "const",
+          "value": 0
+        },
+        {
+          "kind": "const",
+          "value": 0
+        },
+        {
+          "kind": "const",
+          "value": 0
+        },
+        {
+          "kind": "const",
+          "value": 0
+        },
+        {
+          "kind": "const",
+          "value": 0
+        }
+      ],
+      "expect": {
+        "sbi_error": 0,
+        "extension_found": true,
+        "classification": "ok"
+      }
+    },
+    {
+      "kind": "call",
+      "label": "base-probe-hsm",
+      "eid": 16,
+      "fid": 3,
+      "args": [
+        {
+          "kind": "const",
+          "value": 4739917
+        },
+        {
+          "kind": "const",
+          "value": 0
+        },
+        {
+          "kind": "const",
+          "value": 0
+        },
+        {
+          "kind": "const",
+          "value": 0
+        },
+        {
+          "kind": "const",
+          "value": 0
+        },
+        {
+          "kind": "const",
+          "value": 0
+        }
+      ],
+      "expect": {
+        "sbi_error": 0,
+        "extension_found": true,
+        "classification": "ok"
+      }
+    },
+    {
+      "kind": "call",
+      "label": "hsm-hart-status",
+      "eid": 4739917,
+      "fid": 2,
+      "args": [
+        {
+          "kind": "const",
+          "value": 0
+        },
+        {
+          "kind": "const",
+          "value": 0
+        },
+        {
+          "kind": "const",
+          "value": 0
+        },
+        {
+          "kind": "const",
+          "value": 0
+        },
+        {
+          "kind": "const",
+          "value": 0
+        },
+        {
+          "kind": "const",
+          "value": 0
+        }
+      ],
+      "expect": {
+        "sbi_error": 0,
+        "value": 0,
+        "extension_found": true,
+        "classification": "ok"
+      }
+    }
+  ]
+}

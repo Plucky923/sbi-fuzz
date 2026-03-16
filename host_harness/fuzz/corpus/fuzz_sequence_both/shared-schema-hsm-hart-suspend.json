@@ -1,0 +1,54 @@
+{
+  "metadata": {
+    "name": "shared-schema-hsm-hart-suspend",
+    "source": "generated-schema-shared-schema-hsm-hart-suspend-3",
+    "note": "Schema-driven HSM hart-suspend variants with explicit hart switching. Variant: baseline"
+  },
+  "env": {
+    "smp": 4,
+    "platform": ""
+  },
+  "memory": [],
+  "steps": [
+    {
+      "kind": "set_target_hart",
+      "hart_id": 2
+    },
+    {
+      "kind": "busy_wait",
+      "iterations": 512
+    },
+    {
+      "kind": "call",
+      "label": "hsm",
+      "eid": 4739917,
+      "fid": 3,
+      "args": [
+        {
+          "kind": "const",
+          "value": 0
+        },
+        {
+          "kind": "const",
+          "value": 0
+        },
+        {
+          "kind": "const",
+          "value": 0
+        },
+        {
+          "kind": "const",
+          "value": 0
+        },
+        {
+          "kind": "const",
+          "value": 0
+        },
+        {
+          "kind": "const",
+          "value": 0
+        }
+      ]
+    }
+  ]
+}

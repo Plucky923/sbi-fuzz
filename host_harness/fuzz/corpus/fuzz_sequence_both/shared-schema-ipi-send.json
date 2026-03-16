@@ -1,0 +1,54 @@
+{
+  "metadata": {
+    "name": "shared-schema-ipi-send",
+    "source": "generated-schema-shared-schema-ipi-send-0",
+    "note": "Schema-driven IPI fanout variants with explicit caller hart changes. Variant: baseline"
+  },
+  "env": {
+    "smp": 4,
+    "platform": ""
+  },
+  "memory": [],
+  "steps": [
+    {
+      "kind": "set_target_hart",
+      "hart_id": 1
+    },
+    {
+      "kind": "busy_wait",
+      "iterations": 1024
+    },
+    {
+      "kind": "call",
+      "label": "ipi",
+      "eid": 7557193,
+      "fid": 0,
+      "args": [
+        {
+          "kind": "const",
+          "value": 0
+        },
+        {
+          "kind": "const",
+          "value": 0
+        },
+        {
+          "kind": "const",
+          "value": 0
+        },
+        {
+          "kind": "const",
+          "value": 0
+        },
+        {
+          "kind": "const",
+          "value": 0
+        },
+        {
+          "kind": "const",
+          "value": 0
+        }
+      ]
+    }
+  ]
+}

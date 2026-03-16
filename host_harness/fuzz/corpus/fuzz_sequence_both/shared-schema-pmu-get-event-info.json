@@ -1,0 +1,54 @@
+{
+  "metadata": {
+    "name": "shared-schema-pmu-get-event-info",
+    "source": "generated-schema-shared-schema-pmu-get-event-info-8",
+    "note": "Schema-driven PMU shared-memory query variants. Variant: baseline"
+  },
+  "env": {
+    "smp": 2,
+    "platform": ""
+  },
+  "memory": [],
+  "steps": [
+    {
+      "kind": "set_target_hart",
+      "hart_id": 1
+    },
+    {
+      "kind": "busy_wait",
+      "iterations": 256
+    },
+    {
+      "kind": "call",
+      "label": "pmu",
+      "eid": 5262677,
+      "fid": 8,
+      "args": [
+        {
+          "kind": "const",
+          "value": 0
+        },
+        {
+          "kind": "const",
+          "value": 0
+        },
+        {
+          "kind": "const",
+          "value": 0
+        },
+        {
+          "kind": "const",
+          "value": 0
+        },
+        {
+          "kind": "const",
+          "value": 0
+        },
+        {
+          "kind": "const",
+          "value": 0
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "target_kind": "rust_sbi",
+  "mode": "ecall",
+  "call": {
+    "extid": 4739917,
+    "fid": 2,
+    "args": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ]
+  },
+  "hart_id": 0,
+  "hart_state": "started",
+  "privilege": "supervisor",
+  "memory_regions": [],
+  "platform_fault": {
+    "mode": "none",
+    "error": 0,
+    "value": 0,
+    "duplicate_side_effects": false
+  },
+  "fdt_blob": [],
+  "label": "hsm-hart-status"
+}

@@ -123,7 +123,44 @@ To run one host-side harness input and emit a JSON summary:
 cargo helper run-host-harness /tmp/host-seeds-opensbi-ecall/base-get-spec-version.host
 ```
 
+`run-host-harness` now also accepts raw libFuzzer crash files produced by the host-side fuzz targets and replays them by decoding the same structured `from_fuzz_bytes()` format used in-process.
+
 The host harness compiles a small in-process adapter for OpenSBI and RustSBI, so it exercises ecall dispatch, platform-fault injection, and target-specific FDT parsing without booting the full QEMU firmware image. This is intended to complement, not replace, the existing `playground/opensbi-fuzz` and `playground/rustsbi-fuzz` system-level paths.
+
+For the host-side `cargo-fuzz` loop under `host_harness/fuzz/`, first generate the libFuzzer corpus and run a short smoke:
+
+```bash
+make host-fuzz-corpus
+make host-fuzz-smoke
+```
+
+This smoke run performs three checks in order:
+
+1. an intentional `fuzz_harness_smoke` crash to verify the libFuzzer crash/artifact pipeline;
+2. a short single-worker `fuzz_ecall_opensbi` run;
+3. a short single-worker `fuzz_ecall_rustsbi` and `fuzz_sequence_both` run.
+
+To launch the long-running 60-worker RustSBI host-side campaign after the smokes pass:
+
+```bash
+make host-fuzz-60
+```
+
+For the more complex multi-hart host-side sequence campaign, use:
+
+```bash
+make host-fuzz-60-complex
+```
+
+To run the host-side differential target that compares OpenSBI and RustSBI on the same structured inputs:
+
+```bash
+make host-fuzz-diff
+```
+
+The sequence-oriented host-side targets now accept `SBIFUZZ_HOST_SEQUENCE_SMP`, so `make host-fuzz-60-complex` drives structured `.seq` inputs with up to 60 modeled harts instead of the older fixed 4-hart topology. Host-side fuzz runs also disable LeakSanitizer by default (`SBIFUZZ_HOST_FUZZ_DETECT_LEAKS=0`) because this environment trips the known `LeakSanitizer does not work under ptrace` fatal and otherwise turns clean runs into false crashes.
+
+The host-side fuzz logs live under `output/host_fuzz/logs/`, while generated artifacts and crashes are written under `output/host_fuzz/<target>/`.
 
 To generate RustSBI-oriented multi-call `.exec` seeds that exercise HSM, IPI, RFENCE, Console, and PMU flows:
 

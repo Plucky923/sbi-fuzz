@@ -1,0 +1,54 @@
+{
+  "metadata": {
+    "name": "shared-schema-rfence-remote-sfence-vma-arg0-hart3",
+    "source": "generated-schema-shared-schema-rfence-remote-sfence-vma-1-arg0-hart3",
+    "note": "Schema-driven RFENCE variants with multi-hart timing gaps. Variant: arg0-hart3"
+  },
+  "env": {
+    "smp": 4,
+    "platform": ""
+  },
+  "memory": [],
+  "steps": [
+    {
+      "kind": "set_target_hart",
+      "hart_id": 2
+    },
+    {
+      "kind": "busy_wait",
+      "iterations": 1024
+    },
+    {
+      "kind": "call",
+      "label": "fence",
+      "eid": 1380339267,
+      "fid": 1,
+      "args": [
+        {
+          "kind": "const",
+          "value": 8
+        },
+        {
+          "kind": "const",
+          "value": 0
+        },
+        {
+          "kind": "const",
+          "value": 0
+        },
+        {
+          "kind": "const",
+          "value": 0
+        },
+        {
+          "kind": "const",
+          "value": 0
+        },
+        {
+          "kind": "const",
+          "value": 0
+        }
+      ]
+    }
+  ]
+}

@@ -6,7 +6,7 @@ export LLVM_CONFIG_PATH CC CXX LIBCLANG_PATH
 
 all: compile
 
-compile: fuzzer helper injector
+compile: helper injector
 	@echo ">>> All components built successfully"
 
 check-env:
@@ -21,6 +21,39 @@ test-common:
 test-host-harness:
 	@cargo test -p common -p host_harness
 	@cargo check -p helper
+
+test-regression:
+	@bash ./scripts/test-regression.sh
+
+triage-host-fuzz:
+	@python3 ./scripts/triage-host-fuzz-results.py ./output/host_fuzz/fuzz_ecall_rustsbi --json-out ./output/host_fuzz/triage.json --md-out ./output/host_fuzz/triage.md
+
+collect-metrics:
+	@python3 ./scripts/collect-metrics.py --log-dir ./output/host_fuzz/logs --json-out ./output/host_fuzz/metrics.json
+
+cross-layer-dedup:
+	@python3 ./scripts/cross-layer-dedup.py ./output/host_fuzz/triage.json --json-out ./output/host_fuzz/cross-layer.json
+
+host-fuzz-corpus:
+	@./scripts/prepare-host-fuzz-corpus.sh
+
+host-fuzz-smoke:
+	@./scripts/smoke-host-harness-fuzz.sh
+
+host-fuzz-rustsbi:
+	@./scripts/run-host-harness-fuzz.sh fuzz_ecall_rustsbi
+
+host-fuzz-sequence:
+	@./scripts/run-host-harness-fuzz.sh fuzz_sequence_both
+
+host-fuzz-diff:
+	@./scripts/run-host-harness-fuzz.sh fuzz_diff_ecall
+
+host-fuzz-60:
+	@SBIFUZZ_FUZZ_JOBS=60 SBIFUZZ_FUZZ_WORKERS=60 SBIFUZZ_FUZZ_DURATION_SECS=$${SBIFUZZ_FUZZ_DURATION_SECS:-300} ./scripts/run-host-harness-fuzz.sh fuzz_ecall_rustsbi
+
+host-fuzz-60-complex:
+	@SBIFUZZ_FUZZ_JOBS=60 SBIFUZZ_FUZZ_WORKERS=60 SBIFUZZ_FUZZ_DURATION_SECS=$${SBIFUZZ_FUZZ_DURATION_SECS:-300} SBIFUZZ_HOST_SEQUENCE_SMP=$${SBIFUZZ_HOST_SEQUENCE_SMP:-60} SBIFUZZ_MAX_LEN=$${SBIFUZZ_MAX_LEN:-4096} ./scripts/run-host-harness-fuzz.sh fuzz_sequence_both
 
 test-linux-corpus-import:
 	@./scripts/test-import-linux-sbi-corpus.sh
@@ -137,6 +170,17 @@ help:
 	@echo "  check-env-smoke        - Probe tooling and run build smoke checks"
 	@echo "  test-common            - Run common crate automated tests"
 	@echo "  test-host-harness      - Validate the host-side OpenSBI layered harness and helper CLI"
+	@echo "  test-regression        - Run deterministic host-side regression checks"
+	@echo "  triage-host-fuzz       - Triage host_harness fuzz artifacts into JSON/Markdown"
+	@echo "  collect-metrics        - Summarize libFuzzer metrics from host-side logs"
+	@echo "  cross-layer-dedup      - Deduplicate available host/sequence/QEMU reports"
+	@echo "  host-fuzz-corpus       - Generate libFuzzer corpora for host_harness fuzz targets"
+	@echo "  host-fuzz-smoke        - Verify crash-capture chain and run short host_harness fuzz smokes"
+	@echo "  host-fuzz-rustsbi      - Run the RustSBI host_harness libFuzzer target"
+	@echo "  host-fuzz-sequence     - Run the sequence-oriented dual-backend host_harness target"
+	@echo "  host-fuzz-diff         - Run the host-side differential ecall fuzz target"
+	@echo "  host-fuzz-60           - Launch a 60-worker RustSBI host_harness fuzz campaign"
+	@echo "  host-fuzz-60-complex   - Launch a 60-worker multi-hart sequence campaign"
 	@echo "  test-linux-corpus-import - Validate Linux-style SBI corpus import"
 	@echo "  test-opensbi-triage    - Triage current OpenSBI result directories"
 	@echo "  test-opensbi-replay    - Replay representative OpenSBI findings"
@@ -169,4 +213,4 @@ help:
 	@echo "  clean-generated        - Clean generated local samples and reports"
 	@echo "  help                   - Display this help message"
 
-.PHONY: all compile check-env check-env-smoke test-common test-host-harness test-linux-corpus-import test-opensbi-triage test-opensbi-replay test-opensbi-replay-summary test-opensbi-sanitizer-demo test-opensbi-coverage test-opensbi-bug-report test-rustsbi-scenarios test-rustsbi-replay test-rustsbi-helper-timeout test-rustsbi-collect-coverage-timeout test-rustsbi-hang-stability test-rustsbi-hang-minimize test-sbi-hang-semantic-buckets test-rustsbi-fuzz-finds-bug test-sequence-replay sequence-seeds campaign-sequence-opensbi campaign-sequence-rustsbi campaign-opensbi campaign-rustsbi campaign-rustsbi-complex fuzzer helper injector clean clean-cargo clean-injector clean-playgrounds clean-generated help
+.PHONY: all compile check-env check-env-smoke test-common test-host-harness test-regression test-linux-corpus-import test-opensbi-triage test-opensbi-replay test-opensbi-replay-summary test-opensbi-sanitizer-demo test-opensbi-coverage test-opensbi-bug-report test-rustsbi-scenarios test-rustsbi-replay test-rustsbi-helper-timeout test-rustsbi-collect-coverage-timeout test-rustsbi-hang-stability test-rustsbi-hang-minimize test-sbi-hang-semantic-buckets test-rustsbi-fuzz-finds-bug test-sequence-replay triage-host-fuzz collect-metrics cross-layer-dedup host-fuzz-corpus host-fuzz-smoke host-fuzz-rustsbi host-fuzz-sequence host-fuzz-diff host-fuzz-60 host-fuzz-60-complex sequence-seeds campaign-sequence-opensbi campaign-sequence-rustsbi campaign-opensbi campaign-rustsbi campaign-rustsbi-complex fuzzer helper injector clean clean-cargo clean-injector clean-playgrounds clean-generated help

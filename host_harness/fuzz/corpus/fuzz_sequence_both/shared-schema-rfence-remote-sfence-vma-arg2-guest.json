@@ -1,0 +1,85 @@
+{
+  "metadata": {
+    "name": "shared-schema-rfence-remote-sfence-vma-arg2-guest",
+    "source": "generated-schema-shared-schema-rfence-remote-sfence-vma-1-arg2-guest",
+    "note": "Schema-driven RFENCE variants with multi-hart timing gaps. Variant: arg2-guest"
+  },
+  "env": {
+    "smp": 4,
+    "platform": ""
+  },
+  "memory": [
+    {
+      "id": "arg2_mem",
+      "slot_offset": 256,
+      "guest_addr": 2147483648,
+      "read": true,
+      "write": true,
+      "execute": false,
+      "bytes": [
+        97,
+        114,
+        103,
+        50,
+        45,
+        115,
+        101,
+        109,
+        97,
+        110,
+        116,
+        105,
+        99,
+        45,
+        98,
+        117,
+        102,
+        102,
+        101,
+        114
+      ]
+    }
+  ],
+  "steps": [
+    {
+      "kind": "set_target_hart",
+      "hart_id": 2
+    },
+    {
+      "kind": "busy_wait",
+      "iterations": 1024
+    },
+    {
+      "kind": "call",
+      "label": "fence",
+      "eid": 1380339267,
+      "fid": 1,
+      "args": [
+        {
+          "kind": "const",
+          "value": 0
+        },
+        {
+          "kind": "const",
+          "value": 0
+        },
+        {
+          "kind": "memory_addr",
+          "object": "arg2_mem"
+        },
+        {
+          "kind": "const",
+          "value": 0
+        },
+        {
+          "kind": "const",
+          "value": 0
+        },
+        {
+          "kind": "const",
+          "value": 0
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,54 @@
+{
+  "metadata": {
+    "name": "shared-schema-hsm-hart-start-arg0-invalid",
+    "source": "generated-schema-shared-schema-hsm-hart-start-0-arg0-invalid",
+    "note": "Schema-driven HSM hart-start variants with explicit hart switching. Variant: arg0-invalid"
+  },
+  "env": {
+    "smp": 4,
+    "platform": ""
+  },
+  "memory": [],
+  "steps": [
+    {
+      "kind": "set_target_hart",
+      "hart_id": 1
+    },
+    {
+      "kind": "busy_wait",
+      "iterations": 512
+    },
+    {
+      "kind": "call",
+      "label": "hsm",
+      "eid": 4739917,
+      "fid": 0,
+      "args": [
+        {
+          "kind": "const",
+          "value": 18446744073709551615
+        },
+        {
+          "kind": "const",
+          "value": 0
+        },
+        {
+          "kind": "const",
+          "value": 0
+        },
+        {
+          "kind": "const",
+          "value": 0
+        },
+        {
+          "kind": "const",
+          "value": 0
+        },
+        {
+          "kind": "const",
+          "value": 0
+        }
+      ]
+    }
+  ]
+}

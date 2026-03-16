@@ -1,0 +1,54 @@
+{
+  "metadata": {
+    "name": "shared-schema-console-write-arg0-tiny",
+    "source": "generated-schema-shared-schema-console-write-0-arg0-tiny",
+    "note": "Schema-driven console-write variants with memory-backed buffers. Variant: arg0-tiny"
+  },
+  "env": {
+    "smp": 2,
+    "platform": ""
+  },
+  "memory": [],
+  "steps": [
+    {
+      "kind": "set_target_hart",
+      "hart_id": 1
+    },
+    {
+      "kind": "busy_wait",
+      "iterations": 128
+    },
+    {
+      "kind": "call",
+      "label": "console",
+      "eid": 1145193294,
+      "fid": 0,
+      "args": [
+        {
+          "kind": "const",
+          "value": 1
+        },
+        {
+          "kind": "const",
+          "value": 0
+        },
+        {
+          "kind": "const",
+          "value": 0
+        },
+        {
+          "kind": "const",
+          "value": 0
+        },
+        {
+          "kind": "const",
+          "value": 0
+        },
+        {
+          "kind": "const",
+          "value": 0
+        }
+      ]
+    }
+  ]
+}

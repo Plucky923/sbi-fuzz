@@ -1,0 +1,85 @@
+{
+  "metadata": {
+    "name": "shared-schema-console-write-arg1-guest-low",
+    "source": "generated-schema-shared-schema-console-write-0-arg1-guest-low",
+    "note": "Schema-driven console-write variants with memory-backed buffers. Variant: arg1-guest-low"
+  },
+  "env": {
+    "smp": 2,
+    "platform": ""
+  },
+  "memory": [
+    {
+      "id": "arg1_mem",
+      "slot_offset": 256,
+      "guest_addr": 2147483648,
+      "read": true,
+      "write": true,
+      "execute": false,
+      "bytes": [
+        97,
+        114,
+        103,
+        49,
+        45,
+        115,
+        101,
+        109,
+        97,
+        110,
+        116,
+        105,
+        99,
+        45,
+        98,
+        117,
+        102,
+        102,
+        101,
+        114
+      ]
+    }
+  ],
+  "steps": [
+    {
+      "kind": "set_target_hart",
+      "hart_id": 1
+    },
+    {
+      "kind": "busy_wait",
+      "iterations": 128
+    },
+    {
+      "kind": "call",
+      "label": "console",
+      "eid": 1145193294,
+      "fid": 0,
+      "args": [
+        {
+          "kind": "memory_len",
+          "object": "arg1_mem"
+        },
+        {
+          "kind": "memory_addr_low",
+          "object": "arg1_mem"
+        },
+        {
+          "kind": "memory_addr_high",
+          "object": "arg1_mem"
+        },
+        {
+          "kind": "const",
+          "value": 0
+        },
+        {
+          "kind": "const",
+          "value": 0
+        },
+        {
+          "kind": "const",
+          "value": 0
+        }
+      ]
+    }
+  ]
+}
