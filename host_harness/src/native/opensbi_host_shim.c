@@ -1,5 +1,6 @@
 #include <libfdt.h>
 #include <limits.h>
+#include <stdlib.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -72,6 +73,8 @@
 #define SBIFUZZ_SEED_MISSING_CPUS 1
 #define SBIFUZZ_SEED_BAD_COLD_BOOT 2
 #define SBIFUZZ_SEED_BAD_HEAP_SIZE 3
+#define SBIFUZZ_MAX_MODEL_HARTS 64
+#define SBIFUZZ_PMU_COUNTERS 4
 
 struct sbifuzz_host_memory_region {
 	uint64_t guest_addr;
@@ -196,14 +199,23 @@ static bool sbifuzz_find_region(unsigned long addr, unsigned long size,
 				 const struct sbifuzz_host_memory_region **out)
 {
 	size_t i;
+	unsigned long target_end;
+
+	if (size > ULONG_MAX - addr)
+		return false;
+	target_end = addr + size;
 
 	for (i = 0; i < current_request.regions_len; i++) {
 		const struct sbifuzz_host_memory_region *region =
 			&current_request.regions_ptr[i];
 		unsigned long region_start = region->guest_addr;
-		unsigned long region_end = region->guest_addr + region->data_len;
+		unsigned long region_end;
 
-		if (addr < region_start || region_end < addr || region_end < addr + size)
+		if (region->data_len > ULONG_MAX - region_start)
+			continue;
+		region_end = region_start + region->data_len;
+
+		if (addr < region_start || target_end < addr || region_end < target_end)
 			continue;
 		if ((access_flags & SBI_DOMAIN_READ) && !region->read)
 			continue;
@@ -525,6 +537,16 @@ static int sbifuzz_override_error_or_default(int default_result)
 	return default_result;
 }
 
+static bool sbifuzz_valid_hartid(u32 hartid)
+{
+	return hartid < SBIFUZZ_MAX_MODEL_HARTS;
+}
+
+static bool sbifuzz_valid_pmu_counter(u32 cidx)
+{
+	return cidx < SBIFUZZ_PMU_COUNTERS;
+}
+
 int sbi_hsm_hart_start(struct sbi_scratch *scratch, const struct sbi_domain *dom,
 			 u32 target_hartid, unsigned long saddr,
 			 unsigned long smode, unsigned long opaque)
@@ -537,6 +559,8 @@ int sbi_hsm_hart_start(struct sbi_scratch *scratch, const struct sbi_domain *dom
 	(void)opaque;
 	if (sbifuzz_fault_result() != INT32_MAX)
 		return sbifuzz_fault_result();
+	if (!sbifuzz_valid_hartid(target_hartid))
+		return SBI_ERR_INVALID_PARAM;
 	if (current_request.hart_state == SBIFUZZ_HART_STARTED)
 		return SBI_ERR_ALREADY_STARTED;
 	sbifuzz_record_side_effect(1);
@@ -558,9 +582,12 @@ int sbi_hsm_hart_stop(struct sbi_scratch *scratch, bool exitnow)
 int sbi_hsm_hart_get_state(const struct sbi_domain *dom, u32 hartid)
 {
 	(void)dom;
-	(void)hartid;
 	if (sbifuzz_fault_result() != INT32_MAX)
 		return sbifuzz_fault_result();
+	if (!sbifuzz_valid_hartid(hartid))
+		return SBI_ERR_INVALID_PARAM;
+	if (hartid != current_request.hart_id)
+		return SBI_HSM_STATE_STOPPED;
 	switch (current_request.hart_state) {
 	case SBIFUZZ_HART_STOPPED:
 		return SBI_HSM_STATE_STOPPED;
@@ -577,12 +604,13 @@ int sbi_hsm_hart_suspend(struct sbi_scratch *scratch, uint32_t suspend_type,
 			   unsigned long opaque)
 {
 	(void)scratch;
-	(void)suspend_type;
 	(void)resume_addr;
 	(void)mode;
 	(void)opaque;
 	if (sbifuzz_fault_result() != INT32_MAX)
 		return sbifuzz_fault_result();
+	if (suspend_type & ~0x80000000U)
+		return SBI_ERR_INVALID_PARAM;
 	if (current_request.hart_state != SBIFUZZ_HART_STARTED)
 		return SBI_ERR_INVALID_STATE;
 	sbifuzz_record_side_effect(1);
@@ -628,6 +656,8 @@ int sbi_pmu_ctr_get_info(uint32_t cidx, unsigned long *ctr_info)
 {
 	if (sbifuzz_fault_result() != INT32_MAX)
 		return sbifuzz_fault_result();
+	if (!sbifuzz_valid_pmu_counter(cidx))
+		return SBI_ERR_INVALID_PARAM;
 	*ctr_info = 0x100 | cidx;
 	return SBI_SUCCESS;
 }
@@ -651,6 +681,8 @@ int sbi_pmu_ctr_fw_read(uint32_t cidx, uint64_t *cval)
 {
 	if (sbifuzz_fault_result() != INT32_MAX)
 		return sbifuzz_fault_result();
+	if (!sbifuzz_valid_pmu_counter(cidx))
+		return SBI_ERR_INVALID_PARAM;
 	*cval = 0x1000 + cidx;
 	return SBI_SUCCESS;
 }
@@ -803,8 +835,10 @@ static int sbifuzz_parse_coldboot_harts(const void *fdt, int config_offset,
 int sbifuzz_host_parse_fdt(const uint8_t *blob, size_t blob_len,
 			     struct sbifuzz_fdt_response *resp)
 {
-	const void *fdt = blob;
+	void *owned_blob = NULL;
+	const void *fdt;
 	int root_offset, cpus_offset, chosen_offset, config_offset, rc, len;
+	size_t total_size;
 	const char *model;
 	const fdt32_t *heap_prop;
 
@@ -818,18 +852,39 @@ int sbifuzz_host_parse_fdt(const uint8_t *blob, size_t blob_len,
 		return 0;
 	}
 
+	owned_blob = malloc(blob_len);
+	if (!owned_blob)
+		return SBI_ENOMEM;
+	sbi_memcpy(owned_blob, blob, blob_len);
+	fdt = owned_blob;
+
 	rc = fdt_check_header(fdt);
 	if (rc) {
 		resp->status = rc;
 		sbifuzz_copy_cstr(resp->failure, sizeof(resp->failure), fdt_strerror(rc));
-		return 0;
+		goto out;
+	}
+
+	total_size = (size_t)fdt_totalsize(fdt);
+	if (total_size < sizeof(struct fdt_header) || total_size > blob_len) {
+		resp->status = -FDT_ERR_TRUNCATED;
+		sbifuzz_copy_cstr(resp->failure, sizeof(resp->failure),
+				  fdt_strerror(-FDT_ERR_TRUNCATED));
+		goto out;
+	}
+
+	rc = fdt_check_full(fdt, blob_len);
+	if (rc) {
+		resp->status = rc;
+		sbifuzz_copy_cstr(resp->failure, sizeof(resp->failure), fdt_strerror(rc));
+		goto out;
 	}
 
 	root_offset = fdt_path_offset(fdt, "/");
 	if (root_offset < 0) {
 		resp->status = root_offset;
 		sbifuzz_copy_cstr(resp->failure, sizeof(resp->failure), fdt_strerror(root_offset));
-		return 0;
+		goto out;
 	}
 
 	model = fdt_getprop(fdt, root_offset, "model", &len);
@@ -840,14 +895,14 @@ int sbifuzz_host_parse_fdt(const uint8_t *blob, size_t blob_len,
 	if (cpus_offset < 0) {
 		resp->status = cpus_offset;
 		sbifuzz_copy_cstr(resp->failure, sizeof(resp->failure), fdt_strerror(cpus_offset));
-		return 0;
+		goto out;
 	}
 
 	rc = sbifuzz_parse_hart_count(fdt, cpus_offset, &resp->hart_count);
 	if (rc) {
 		resp->status = rc;
 		sbifuzz_copy_cstr(resp->failure, sizeof(resp->failure), fdt_strerror(rc));
-		return 0;
+		goto out;
 	}
 
 	chosen_offset = fdt_path_offset(fdt, "/chosen");
@@ -865,18 +920,20 @@ int sbifuzz_host_parse_fdt(const uint8_t *blob, size_t blob_len,
 		} else if (heap_prop) {
 			resp->status = -FDT_ERR_BADVALUE;
 			sbifuzz_copy_cstr(resp->failure, sizeof(resp->failure), fdt_strerror(-FDT_ERR_BADVALUE));
-			return 0;
+			goto out;
 		}
 
 		rc = sbifuzz_parse_coldboot_harts(fdt, config_offset, &resp->coldboot_hart_count);
 		if (rc) {
 			resp->status = rc;
 			sbifuzz_copy_cstr(resp->failure, sizeof(resp->failure), fdt_strerror(rc));
-			return 0;
+			goto out;
 		}
 	}
 
 	resp->status = 0;
+out:
+	free(owned_blob);
 	return 0;
 }
 

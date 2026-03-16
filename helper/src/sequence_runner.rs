@@ -1,11 +1,11 @@
 use common::{
     HostCall, HostHarnessInput, HostHarnessMode, HostHartState, HostMemoryRegion,
-    HostPlatformFaultMode, HostPlatformFaultProfile, HostPrivilegeState, HostTargetKind,
-    SequenceArg, SequenceFdtExpectation, SequenceMemoryObject, SequenceProgram, SequenceStep,
-    generate_seed_variants, sequence_memory_guest_addr, sequence_program_describe,
-    sequence_program_from_bytes, sequence_program_from_exec, sequence_program_from_semantic_input,
-    sequence_program_from_toml_input, sequence_program_semantic_signature,
-    sequence_program_to_bytes,
+    HostPlatformFaultProfile, HostPrivilegeState, HostTargetKind,
+    MemoryOracle, SequenceArg, SequenceFdtExpectation, SequenceMemoryObject, SequenceProgram,
+    SequenceStep, check_host_report, generate_seed_variants,
+    sequence_memory_guest_addr, sequence_program_describe, sequence_program_from_bytes,
+    sequence_program_from_exec, sequence_program_from_semantic_input,
+    sequence_program_from_toml_input, sequence_program_semantic_signature, sequence_program_to_bytes,
 };
 use host_harness::{self, FdtSeedVariant, HostHarnessReport, HostHarnessResult};
 use serde::Serialize;
@@ -70,6 +70,25 @@ pub struct SequenceDiffReport {
     pub rustsbi: SequenceRunReport,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct SequenceViolationSummary {
+    pub kind: String,
+    pub signature: String,
+    pub step_index: usize,
+    pub step_kind: String,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SequenceMinimizeReport {
+    pub input: String,
+    pub output: String,
+    pub impl_kind: HostTargetKind,
+    pub original_steps: usize,
+    pub minimized_steps: usize,
+    pub violation: SequenceViolationSummary,
+}
+
 #[derive(Debug, Clone)]
 struct SequenceExecutionState {
     active_hart: u64,
@@ -77,13 +96,21 @@ struct SequenceExecutionState {
     platform_fault: HostPlatformFaultProfile,
     hart_states: BTreeMap<u64, HostHartState>,
     call_results: Vec<u64>,
+    memory_regions: Vec<HostMemoryRegion>,
 }
 
 impl SequenceExecutionState {
     fn new(program: &SequenceProgram) -> Self {
         let mut hart_states = BTreeMap::new();
         for hart_id in 0..program.env.smp {
-            hart_states.insert(u64::from(hart_id), HostHartState::Started);
+            hart_states.insert(
+                u64::from(hart_id),
+                if hart_id == 0 {
+                    HostHartState::Started
+                } else {
+                    HostHartState::Stopped
+                },
+            );
         }
         Self {
             active_hart: 0,
@@ -91,6 +118,7 @@ impl SequenceExecutionState {
             platform_fault: HostPlatformFaultProfile::none(),
             hart_states,
             call_results: Vec::new(),
+            memory_regions: memory_regions(program),
         }
     }
 
@@ -214,6 +242,68 @@ pub fn diff_sequence(input: PathBuf, json_out: Option<PathBuf>) -> Result<(), St
     emit_json(&report, json_out)
 }
 
+pub fn minimize_spec_violation(
+    input: PathBuf,
+    impl_kind: HostTargetKind,
+    output: PathBuf,
+    json_out: Option<PathBuf>,
+) -> Result<(), String> {
+    let mut program = load_sequence_program(&input)?;
+    let Some(violation) = detect_sequence_violation(&program, impl_kind)? else {
+        return Err(format!(
+            "sequence {} did not trigger a spec or memory violation on {}",
+            input.display(),
+            impl_name(impl_kind)
+        ));
+    };
+
+    let original_steps = program.steps.len();
+    let baseline_signature = violation.signature.clone();
+    let mut changed = true;
+    while changed {
+        changed = false;
+        for index in 0..program.steps.len() {
+            let mut candidate = program.clone();
+            candidate.steps.remove(index);
+            if common::validate_sequence_program(&candidate).is_err() {
+                continue;
+            }
+            let Some(candidate_violation) = detect_sequence_violation(&candidate, impl_kind)? else {
+                continue;
+            };
+            if candidate_violation.signature == baseline_signature {
+                program = candidate;
+                changed = true;
+                break;
+            }
+        }
+    }
+
+    let encoded = if output.extension().and_then(|ext| ext.to_str()) == Some("seq") {
+        sequence_program_to_bytes(&program)
+    } else {
+        serde_json::to_vec_pretty(&program).map_err(|err| err.to_string())?
+    };
+    fs::write(&output, if output.extension().and_then(|ext| ext.to_str()) == Some("seq") {
+        encoded
+    } else {
+        let mut with_newline = encoded;
+        with_newline.push(b'\n');
+        with_newline
+    })
+    .map_err(|err| err.to_string())?;
+
+    let report = SequenceMinimizeReport {
+        input: input.display().to_string(),
+        output: output.display().to_string(),
+        impl_kind,
+        original_steps,
+        minimized_steps: program.steps.len(),
+        violation,
+    };
+    emit_json(&report, json_out)
+}
+
 pub fn run_sequence_program(
     program: &SequenceProgram,
     impl_kind: HostTargetKind,
@@ -270,10 +360,10 @@ pub fn run_sequence_program(
                     .collect::<Result<Vec<_>, _>>()?;
                 let input = HostHarnessInput {
                     target_kind: impl_kind,
-                    mode: if state.platform_fault.mode == HostPlatformFaultMode::None {
-                        HostHarnessMode::Ecall
-                    } else {
+                    mode: if state.platform_fault.is_active() {
                         HostHarnessMode::PlatformFault
+                    } else {
+                        HostHarnessMode::Ecall
                     },
                     call: HostCall::new(
                         *eid,
@@ -285,7 +375,7 @@ pub fn run_sequence_program(
                     hart_id: state.active_hart,
                     hart_state: state.hart_state(state.active_hart),
                     privilege: state.privilege,
-                    memory_regions: memory_regions(program),
+                    memory_regions: state.memory_regions.clone(),
                     platform_fault: state.platform_fault,
                     fdt_blob: Vec::new(),
                     label: if label.trim().is_empty() {
@@ -296,6 +386,9 @@ pub fn run_sequence_program(
                 };
                 let host_report = host_harness::run(&input)?;
                 let report = call_step_report(index, label, &host_report, expect, &state);
+                if !host_report.post_memory_regions.is_empty() {
+                    state.memory_regions = host_report.post_memory_regions.clone();
+                }
                 update_call_state(&mut state, *eid, *fid, &values, &host_report);
                 steps.push(report.clone());
                 continue;
@@ -403,6 +496,129 @@ fn emit_json<T: Serialize>(value: &T, json_out: Option<PathBuf>) -> Result<(), S
     }
     println!("{encoded}");
     Ok(())
+}
+
+fn detect_sequence_violation(
+    program: &SequenceProgram,
+    impl_kind: HostTargetKind,
+) -> Result<Option<SequenceViolationSummary>, String> {
+    let mut state = SequenceExecutionState::new(program);
+    let memory_map = memory_map(program);
+
+    for (index, step) in program.steps.iter().enumerate() {
+        match step {
+            SequenceStep::SetTargetHart { hart_id } => {
+                state.active_hart = *hart_id;
+            }
+            SequenceStep::SetHartState { hart_id, state: hart_state } => {
+                state.hart_states.insert(*hart_id, *hart_state);
+            }
+            SequenceStep::SetPrivilege { privilege } => {
+                state.privilege = *privilege;
+            }
+            SequenceStep::SetPlatformFault { profile } => {
+                state.platform_fault = *profile;
+            }
+            SequenceStep::BusyWait { .. } => {}
+            SequenceStep::Call {
+                label,
+                eid,
+                fid,
+                args,
+                ..
+            } => {
+                let values = args
+                    .iter()
+                    .map(|arg| materialize_arg(arg, &memory_map, &state))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let input = HostHarnessInput {
+                    target_kind: impl_kind,
+                    mode: if state.platform_fault.is_active() {
+                        HostHarnessMode::PlatformFault
+                    } else {
+                        HostHarnessMode::Ecall
+                    },
+                    call: HostCall::new(
+                        *eid,
+                        *fid,
+                        [
+                            values[0], values[1], values[2], values[3], values[4], values[5],
+                        ],
+                    ),
+                    hart_id: state.active_hart,
+                    hart_state: state.hart_state(state.active_hart),
+                    privilege: state.privilege,
+                    memory_regions: state.memory_regions.clone(),
+                    platform_fault: state.platform_fault,
+                    fdt_blob: Vec::new(),
+                    label: if label.trim().is_empty() {
+                        format!("call-{index}")
+                    } else {
+                        label.clone()
+                    },
+                };
+                let mem_oracle = MemoryOracle::snapshot_before(&input.memory_regions);
+                let report = host_harness::run(&input)?;
+                let verdict = check_host_report(&input, &report);
+                if let Some(violation) = verdict.violations.first() {
+                    return Ok(Some(SequenceViolationSummary {
+                        kind: "spec".to_string(),
+                        signature: format!("spec:{violation:?}"),
+                        step_index: index,
+                        step_kind: "call".to_string(),
+                        detail: format!("{violation:?}"),
+                    }));
+                }
+                if let Some(violation) = mem_oracle.check_after(&input, &report).first() {
+                    return Ok(Some(SequenceViolationSummary {
+                        kind: "memory".to_string(),
+                        signature: format!("memory:{violation:?}"),
+                        step_index: index,
+                        step_kind: "call".to_string(),
+                        detail: format!("{violation:?}"),
+                    }));
+                }
+                if !report.post_memory_regions.is_empty() {
+                    state.memory_regions = report.post_memory_regions.clone();
+                }
+                update_call_state(&mut state, *eid, *fid, &values, &report);
+            }
+            SequenceStep::ParseFdt { label, object, .. } => {
+                let memory = memory_map
+                    .get(object)
+                    .ok_or_else(|| format!("unknown memory object {object}"))?;
+                let input = HostHarnessInput {
+                    target_kind: impl_kind,
+                    mode: HostHarnessMode::Fdt,
+                    call: HostCall::new(0, 0, [0; 6]),
+                    hart_id: state.active_hart,
+                    hart_state: state.hart_state(state.active_hart),
+                    privilege: state.privilege,
+                    memory_regions: Vec::new(),
+                    platform_fault: HostPlatformFaultProfile::none(),
+                    fdt_blob: memory.bytes.clone(),
+                    label: if label.trim().is_empty() {
+                        format!("fdt-{index}")
+                    } else {
+                        label.clone()
+                    },
+                };
+                let report = host_harness::run(&input)?;
+                let verdict = check_host_report(&input, &report);
+                if let Some(violation) = verdict.violations.first() {
+                    return Ok(Some(SequenceViolationSummary {
+                        kind: "spec".to_string(),
+                        signature: format!("spec:{violation:?}"),
+                        step_index: index,
+                        step_kind: "parse_fdt".to_string(),
+                        detail: format!("{violation:?}"),
+                    }));
+                }
+            }
+        }
+    }
+
+    Ok(None)
 }
 
 fn materialize_arg(
@@ -1118,6 +1334,11 @@ fn impl_name(kind: HostTargetKind) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use common::{
+        HostCall, HostHarnessMode, HostHartState, HostMemoryRegion, HostPlatformFaultMode,
+        HostPlatformFaultProfile, HostPrivilegeState, SequenceArg, SequenceEnv,
+        SequenceMemoryObject, SequenceMetadata, SequenceProgram, SequenceStep,
+    };
 
     #[test]
     fn shared_sequence_runs_on_both_backends() {
@@ -1181,5 +1402,97 @@ mod tests {
         };
         let diff = diff_sequence_reports("seq".to_string(), "shared".to_string(), opensbi, rustsbi);
         assert_eq!(diff.classification, "match");
+    }
+
+    #[test]
+    fn duplicate_side_effect_faults_are_classified_as_platform_fault() {
+        let program = SequenceProgram {
+            metadata: SequenceMetadata {
+                name: "dup-console".to_string(),
+                source: "test".to_string(),
+                note: String::new(),
+            },
+            env: SequenceEnv {
+                smp: 1,
+                impl_hint: Some(HostTargetKind::OpenSbi),
+                platform: "host".to_string(),
+            },
+            memory: vec![SequenceMemoryObject {
+                id: "console_buf".to_string(),
+                slot_offset: 0x40,
+                guest_addr: Some(0x8000_2000),
+                read: true,
+                write: true,
+                execute: false,
+                bytes: b"ping".to_vec(),
+            }],
+            steps: vec![
+                SequenceStep::SetPlatformFault {
+                    profile: HostPlatformFaultProfile {
+                        mode: HostPlatformFaultMode::None,
+                        error: 0,
+                        value: 0,
+                        duplicate_side_effects: true,
+                    },
+                },
+                SequenceStep::Call {
+                    label: "console-write".to_string(),
+                    eid: 0x4442_434e,
+                    fid: 0,
+                    args: vec![
+                        SequenceArg::MemoryLen {
+                            object: "console_buf".to_string(),
+                        },
+                        SequenceArg::MemoryAddrLow {
+                            object: "console_buf".to_string(),
+                        },
+                        SequenceArg::MemoryAddrHigh {
+                            object: "console_buf".to_string(),
+                        },
+                        SequenceArg::Const { value: 0 },
+                        SequenceArg::Const { value: 0 },
+                        SequenceArg::Const { value: 0 },
+                    ],
+                    expect: None,
+                },
+            ],
+        };
+
+        let report =
+            run_sequence_program(&program, HostTargetKind::OpenSbi, "mem".to_string())
+                .expect("run sequence with duplicate side effects");
+        assert_eq!(report.classification, "ok");
+        assert_eq!(report.steps.len(), 2);
+        assert_eq!(report.steps[1].classification, "ok");
+
+        let input = HostHarnessInput {
+            target_kind: HostTargetKind::OpenSbi,
+            mode: HostHarnessMode::PlatformFault,
+            call: HostCall::new(0x4442_434e, 0, [4, 0x8000_2000, 0, 0, 0, 0]),
+            hart_id: 0,
+            hart_state: HostHartState::Started,
+            privilege: HostPrivilegeState::Supervisor,
+            memory_regions: vec![HostMemoryRegion {
+                guest_addr: 0x8000_2000,
+                read: true,
+                write: true,
+                execute: false,
+                bytes: b"ping".to_vec(),
+            }],
+            platform_fault: HostPlatformFaultProfile {
+                mode: HostPlatformFaultMode::None,
+                error: 0,
+                value: 0,
+                duplicate_side_effects: true,
+            },
+            fdt_blob: Vec::new(),
+            label: "dup-console".to_string(),
+        };
+        let host_report = host_harness::run(&input).expect("run host input");
+        if let HostHarnessResult::Ecall(ecall) = host_report.result {
+            assert_eq!(ecall.value, 8);
+        } else {
+            panic!("expected ecall report");
+        }
     }
 }

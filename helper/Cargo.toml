@@ -3,17 +3,26 @@ name = "helper"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = []
+qemu = [
+    "dep:libafl",
+    "dep:libafl_bolts",
+    "dep:libafl_qemu",
+    "dep:libafl_targets",
+]
+
 [dependencies]
 common = { path = "../common" }
 host_harness = { path = "../host_harness" }
 clap = { version = "4.5", features = ["derive"] }
-libafl = "0.15.1"
-libafl_bolts = "0.15.1"
+libafl = { version = "0.15.1", optional = true }
+libafl_bolts = { version = "0.15.1", optional = true }
 libafl_qemu = { version = "0.15.1", features = [
     "riscv64",
     "systemmode",
-], default-features = false }
-libafl_targets = "0.15.1"
+], default-features = false, optional = true }
+libafl_targets = { version = "0.15.1", optional = true }
 walkdir = "2.5.0"
 regex = "1.11.1"
 tempfile = "3.17.1"

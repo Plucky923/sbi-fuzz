@@ -1,0 +1,21 @@
+{
+  "target_kind": "open_sbi",
+  "mode": "ecall",
+  "call": {
+    "extid": 5262677,
+    "fid": 1,
+    "args": [8, 0, 0, 0, 0, 0]
+  },
+  "hart_id": 0,
+  "hart_state": "started",
+  "privilege": "supervisor",
+  "memory_regions": [],
+  "platform_fault": {
+    "mode": "none",
+    "error": 0,
+    "value": 0,
+    "duplicate_side_effects": false
+  },
+  "fdt_blob": [],
+  "label": "regression-pmu-counter-out-of-range"
+}

@@ -9,6 +9,8 @@ import tomllib
 from collections import Counter, defaultdict
 from pathlib import Path
 
+REPO_ROOT = Path(__file__).resolve().parent.parent
+
 STATUS_RE = re.compile(r"Run finish\. Exit kind: (\w+)")
 SOURCE_RE = re.compile(r"fuzz-([0-9a-f]+)-(\w+)$")
 RUNSTATE_RE = re.compile(r"invalid runstate transition", re.I)
@@ -334,13 +336,36 @@ def collect_cases(result_dir: Path):
     return cases
 
 
-def resolve_helper_cmd(explicit: str | None):
-    if explicit:
+def helper_supports_subcommand(helper_path: str, subcommand: str) -> bool:
+    proc = subprocess.run(
+        [helper_path, "--help"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        return False
+    pattern = re.compile(rf"(?m)^  {re.escape(subcommand)}(?:\s|$)")
+    return bool(pattern.search(proc.stdout))
+
+
+def build_qemu_helper() -> str:
+    subprocess.run(
+        ["cargo", "build", "-q", "-p", "helper", "--release", "--features", "qemu"],
+        cwd=REPO_ROOT,
+        check=True,
+    )
+    return str(REPO_ROOT / "target/release/helper")
+
+
+def resolve_helper_cmd(explicit: str | None, required_subcommand: str = "run"):
+    helper_path = explicit or str(REPO_ROOT / "target/release/helper")
+    if Path(helper_path).exists() and helper_supports_subcommand(helper_path, required_subcommand):
+        return [helper_path]
+    rebuilt = build_qemu_helper()
+    if explicit and Path(helper_path).exists():
         return [explicit]
-    built = Path("target/release/helper")
-    if built.exists():
-        return [str(built)]
-    return ["cargo", "run", "-q", "-p", "helper", "--"]
+    return [rebuilt]
 
 
 def classify_output(output: str, actual: str, expected: str):
@@ -1048,7 +1073,7 @@ def replay_cli(default_label: str = "SBI") -> int:
     if not args.all:
         cases = cases[: args.limit]
 
-    helper_cmd = resolve_helper_cmd(args.helper_bin)
+    helper_cmd = resolve_helper_cmd(args.helper_bin, required_subcommand="run")
     results = [
         replay_case(
             case,
@@ -1119,7 +1144,7 @@ def replay_sequence_cli(default_label: str = "SBI Sequence") -> int:
     if not args.all:
         cases = cases[: args.limit]
 
-    helper_cmd = resolve_helper_cmd(args.helper_bin)
+    helper_cmd = resolve_helper_cmd(args.helper_bin, required_subcommand="run-sequence")
     results = [
         replay_sequence_case(case, args.target_kind, helper_cmd, args.timeout_secs, args.log_dir)
         for case in cases

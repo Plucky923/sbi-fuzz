@@ -58,7 +58,7 @@ def main() -> int:
     args = parser.parse_args()
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    helper_cmd = resolve_helper_cmd(args.helper_bin)
+    helper_cmd = resolve_helper_cmd(args.helper_bin, required_subcommand="minimize-hang")
     data = json.loads(args.hang_stability_json.read_text())
     stable_cases = [
         item for item in data.get("cases", []) if item.get("label") == "stable_hang"

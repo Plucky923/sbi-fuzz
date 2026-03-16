@@ -231,7 +231,6 @@ fn run_helper(
     let stderr = String::from_utf8_lossy(&output.stderr);
     parse_exit_kind(&stdout)
         .or_else(|| parse_exit_kind(&stderr))
-        .map(str::to_string)
         .ok_or_else(|| {
             format!(
                 "unable to parse exit kind for {} (status={}): stdout={:?} stderr={:?}",
@@ -243,12 +242,39 @@ fn run_helper(
         })
 }
 
-fn parse_exit_kind(text: &str) -> Option<&str> {
-    text.lines().rev().find_map(|line| {
+fn parse_exit_kind(text: &str) -> Option<String> {
+    let sanitized = sanitize_helper_output(text);
+    sanitized.lines().rev().find_map(|line| {
         line.trim()
             .strip_prefix("Run finish. Exit kind: ")
             .map(str::trim)
+            .filter(|kind| !kind.is_empty())
+            .map(str::to_string)
     })
+}
+
+fn sanitize_helper_output(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars();
+    while let Some(ch) = chars.next() {
+        if ch == '\u{1b}' {
+            if matches!(chars.clone().next(), Some('[')) {
+                chars.next();
+                for esc in chars.by_ref() {
+                    if ('@'..='~').contains(&esc) {
+                        break;
+                    }
+                }
+            }
+            continue;
+        }
+
+        if ch.is_control() && !matches!(ch, '\n' | '\r' | '\t') {
+            continue;
+        }
+        out.push(ch);
+    }
+    out
 }
 
 fn all_timeouts(actuals: &[String]) -> bool {
@@ -489,7 +515,9 @@ mod tests {
     #[test]
     fn parse_exit_kind_reads_helper_output() {
         let output = "noise\n\rRun finish. Exit kind: Timeout \n";
-        assert_eq!(parse_exit_kind(output), Some("Timeout"));
+        assert_eq!(parse_exit_kind(output).as_deref(), Some("Timeout"));
+        let colored = "\u{1b}[1;32mINFO\u{1b}[0m\n\u{13}Run finish. Exit kind: Timeout\r\n";
+        assert_eq!(parse_exit_kind(colored).as_deref(), Some("Timeout"));
         assert_eq!(parse_exit_kind("missing"), None);
     }
 

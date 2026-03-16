@@ -75,7 +75,7 @@ def main() -> int:
         for item in replay_data.get("results", [])
         if item.get("classification") == "hang"
     ]
-    helper_cmd = resolve_helper_cmd(args.helper_bin)
+    helper_cmd = resolve_helper_cmd(args.helper_bin, required_subcommand="run")
     cases = [
         summarize_case(
             entry,

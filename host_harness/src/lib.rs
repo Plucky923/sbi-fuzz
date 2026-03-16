@@ -1,8 +1,10 @@
 mod opensbi;
 mod rustsbi;
 
-use common::{HostHarnessInput, HostHarnessMode, HostTargetKind};
-use serde::Serialize;
+use common::{HostHarnessInput, HostTargetKind};
+pub use common::{
+    HostEcallReport, HostFdtDetails, HostFdtReport, HostHarnessReport, HostHarnessResult,
+};
 
 pub const FDT_SEED_BUFFER_CAPACITY: usize = 4096;
 
@@ -14,66 +16,6 @@ pub enum FdtSeedVariant {
     BadHeapSize,
     BadStdoutPath,
     BadConsoleCompatible,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct HostHarnessReport {
-    pub target_kind: HostTargetKind,
-    pub backend: String,
-    pub mode: HostHarnessMode,
-    pub classification: String,
-    pub signature: String,
-    #[serde(flatten)]
-    pub result: HostHarnessResult,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum HostHarnessResult {
-    Ecall(HostEcallReport),
-    Fdt(HostFdtReport),
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct HostEcallReport {
-    pub extid: u64,
-    pub fid: u64,
-    pub sbi_error: i64,
-    pub sbi_error_name: Option<String>,
-    pub value: u64,
-    pub next_mepc: Option<u64>,
-    pub extension_found: bool,
-    pub side_effects: u32,
-    pub console_bytes: u32,
-    pub timer_value: u64,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct HostFdtReport {
-    pub status: i32,
-    pub model: String,
-    pub hart_count: u32,
-    pub chosen_present: bool,
-    pub config_present: bool,
-    pub failure: Option<String>,
-    pub details: HostFdtDetails,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(tag = "target", rename_all = "snake_case")]
-pub enum HostFdtDetails {
-    OpenSbi {
-        coldboot_hart_count: u32,
-        heap_size: u32,
-    },
-    RustSbi {
-        stdout_path_present: bool,
-        console_present: bool,
-        ipi_present: bool,
-        reset_present: bool,
-        memory_start: u64,
-        memory_end: u64,
-    },
 }
 
 pub fn run(input: &HostHarnessInput) -> Result<HostHarnessReport, String> {
@@ -97,9 +39,23 @@ pub fn seed_fdt_blob(
 mod tests {
     use super::*;
     use common::{
-        HostCall, HostHartState, HostMemoryRegion, HostPlatformFaultMode, HostPlatformFaultProfile,
-        HostPrivilegeState, SbiError,
+        HostCall, HostHarnessMode, HostHartState, HostMemoryRegion, HostPlatformFaultMode,
+        HostPlatformFaultProfile, HostPrivilegeState, SbiError,
     };
+
+    const OPEN_FDT_OOB_REPRO_BLOB: &[u8] = &[
+        208, 13, 254, 237, 0, 0, 3, 7, 0, 0, 0, 56, 0, 0, 2, 184, 0, 0, 0, 40, 0, 0, 0, 17,
+        0, 0, 0, 16, 0, 0, 0, 0, 0, 0, 0, 79, 0, 0, 2, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 18, 0, 0, 0, 33, 114, 105,
+        115, 99, 118, 45, 118, 105, 114, 116, 105, 111, 44, 113, 101, 109, 117, 0, 0, 2, 0, 0,
+        0, 3, 0, 0, 0, 18, 0, 0, 0, 27, 114, 117, 115, 116, 115, 98, 105, 44, 113, 101, 109,
+        117, 45, 118, 105, 114, 116, 0, 0, 2, 0, 0, 0, 3, 0, 0, 0, 4, 0, 0, 0, 15, 0, 0, 0, 2,
+        0, 0, 0, 3, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 1, 99, 104, 111, 115, 101,
+        110, 0, 0, 0, 0, 0, 3, 0, 0, 0, 21, 0, 0, 0, 67, 47, 115, 111, 99, 47, 115, 101, 114,
+        105, 97, 108, 64, 49, 48, 48, 48, 48, 48, 48, 48, 0, 0, 0, 15, 0, 0, 0, 2, 0, 0, 0, 1,
+        115, 111, 99, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 60, 0, 0, 0, 3, 0, 0, 0, 4, 0, 0,
+        0, 15, 0, 0, 0, 2, 0, 0, 0, 3, 0, 0, 0, 4,
+    ];
 
     #[test]
     fn opensbi_base_get_spec_version_runs() {
@@ -243,6 +199,114 @@ mod tests {
     }
 
     #[test]
+    fn rustsbi_console_read_updates_post_memory_snapshot() {
+        let input = HostHarnessInput {
+            target_kind: HostTargetKind::RustSbi,
+            mode: HostHarnessMode::Ecall,
+            call: HostCall::new(0x4442_434e, 1, [4, 0x8000_3000, 0, 0, 0, 0]),
+            hart_id: 0,
+            hart_state: HostHartState::Started,
+            privilege: HostPrivilegeState::Supervisor,
+            memory_regions: vec![HostMemoryRegion {
+                guest_addr: 0x8000_3000,
+                read: true,
+                write: true,
+                execute: false,
+                bytes: vec![0; 4],
+            }],
+            platform_fault: HostPlatformFaultProfile::none(),
+            fdt_blob: Vec::new(),
+            label: "rustsbi-console-read".to_string(),
+        };
+
+        let report = run(&input).expect("run rustsbi console read");
+        match report.result {
+            HostHarnessResult::Ecall(report) => {
+                assert_eq!(report.sbi_error, 0);
+                assert_eq!(
+                    input.memory_regions[0].bytes,
+                    vec![0, 0, 0, 0],
+                    "input snapshot should remain immutable"
+                );
+            }
+            HostHarnessResult::Fdt(_) => panic!("expected ecall report"),
+        }
+        assert_eq!(report.post_memory_regions[0].bytes, b"RRRR");
+    }
+
+    #[test]
+    fn opensbi_hsm_suspend_rejects_invalid_suspend_type() {
+        let input = HostHarnessInput {
+            target_kind: HostTargetKind::OpenSbi,
+            mode: HostHarnessMode::Ecall,
+            call: HostCall::new(0x4853_4d, 3, [0x1234, 0, 0, 0, 0, 0]),
+            hart_id: 0,
+            hart_state: HostHartState::Unknown,
+            privilege: HostPrivilegeState::Machine,
+            memory_regions: Vec::new(),
+            platform_fault: HostPlatformFaultProfile::none(),
+            fdt_blob: Vec::new(),
+            label: "opensbi-hsm-suspend-invalid-type".to_string(),
+        };
+
+        let report = run(&input).expect("run opensbi hsm suspend");
+        match report.result {
+            HostHarnessResult::Ecall(report) => {
+                assert_eq!(report.sbi_error, SbiError::InvalidParam.code());
+            }
+            HostHarnessResult::Fdt(_) => panic!("expected ecall report"),
+        }
+    }
+
+    #[test]
+    fn opensbi_pmu_counter_get_info_rejects_out_of_range_counter() {
+        let input = HostHarnessInput {
+            target_kind: HostTargetKind::OpenSbi,
+            mode: HostHarnessMode::Ecall,
+            call: HostCall::new(0x504D55, 1, [8, 0, 0, 0, 0, 0]),
+            hart_id: 0,
+            hart_state: HostHartState::Started,
+            privilege: HostPrivilegeState::Machine,
+            memory_regions: Vec::new(),
+            platform_fault: HostPlatformFaultProfile::none(),
+            fdt_blob: Vec::new(),
+            label: "opensbi-pmu-counter-invalid".to_string(),
+        };
+
+        let report = run(&input).expect("run opensbi pmu get_info");
+        match report.result {
+            HostHarnessResult::Ecall(report) => {
+                assert_eq!(report.sbi_error, SbiError::InvalidParam.code());
+            }
+            HostHarnessResult::Fdt(_) => panic!("expected ecall report"),
+        }
+    }
+
+    #[test]
+    fn opensbi_hsm_status_rejects_invalid_hart() {
+        let input = HostHarnessInput {
+            target_kind: HostTargetKind::OpenSbi,
+            mode: HostHarnessMode::Ecall,
+            call: HostCall::new(0x4853_4d, 2, [255, 0, 0, 0, 0, 0]),
+            hart_id: 0,
+            hart_state: HostHartState::Started,
+            privilege: HostPrivilegeState::Supervisor,
+            memory_regions: Vec::new(),
+            platform_fault: HostPlatformFaultProfile::none(),
+            fdt_blob: Vec::new(),
+            label: "opensbi-hsm-status-invalid-hart".to_string(),
+        };
+
+        let report = run(&input).expect("run opensbi hsm status");
+        match report.result {
+            HostHarnessResult::Ecall(report) => {
+                assert_eq!(report.sbi_error, SbiError::InvalidParam.code());
+            }
+            HostHarnessResult::Fdt(_) => panic!("expected ecall report"),
+        }
+    }
+
+    #[test]
     fn opensbi_minimal_fdt_seed_parses() {
         let blob =
             seed_fdt_blob(HostTargetKind::OpenSbi, FdtSeedVariant::Minimal).expect("build DTB");
@@ -265,6 +329,61 @@ mod tests {
                 assert_eq!(report.status, 0);
                 assert!(report.config_present);
                 assert_eq!(report.hart_count, 1);
+            }
+            HostHarnessResult::Ecall(_) => panic!("expected fdt report"),
+        }
+    }
+
+    #[test]
+    fn opensbi_truncated_fdt_is_reported_as_error() {
+        let mut blob =
+            seed_fdt_blob(HostTargetKind::OpenSbi, FdtSeedVariant::Minimal).expect("build DTB");
+        blob.truncate(blob.len().saturating_sub(16));
+        let input = HostHarnessInput {
+            target_kind: HostTargetKind::OpenSbi,
+            mode: HostHarnessMode::Fdt,
+            call: HostCall::new(0, 0, [0; 6]),
+            hart_id: 0,
+            hart_state: HostHartState::Started,
+            privilege: HostPrivilegeState::Supervisor,
+            memory_regions: Vec::new(),
+            platform_fault: HostPlatformFaultProfile::none(),
+            fdt_blob: blob,
+            label: "opensbi-fdt-truncated".to_string(),
+        };
+
+        let report = run(&input).expect("run opensbi truncated fdt");
+        assert_eq!(report.classification, "fdt_error");
+        match report.result {
+            HostHarnessResult::Fdt(report) => {
+                assert_ne!(report.status, 0);
+                assert!(report.failure.is_some());
+            }
+            HostHarnessResult::Ecall(_) => panic!("expected fdt report"),
+        }
+    }
+
+    #[test]
+    fn opensbi_known_fdt_oob_reproducer_is_now_reported_as_fdt_error() {
+        let input = HostHarnessInput {
+            target_kind: HostTargetKind::OpenSbi,
+            mode: HostHarnessMode::Fdt,
+            call: HostCall::new(0, 0, [0; 6]),
+            hart_id: 1,
+            hart_state: HostHartState::Started,
+            privilege: HostPrivilegeState::Supervisor,
+            memory_regions: Vec::new(),
+            platform_fault: HostPlatformFaultProfile::none(),
+            fdt_blob: OPEN_FDT_OOB_REPRO_BLOB.to_vec(),
+            label: "opensbi-fdt-oob-repro".to_string(),
+        };
+
+        let report = run(&input).expect("run opensbi oob repro fdt");
+        assert_eq!(report.classification, "fdt_error");
+        match report.result {
+            HostHarnessResult::Fdt(report) => {
+                assert_ne!(report.status, 0);
+                assert!(report.failure.is_some());
             }
             HostHarnessResult::Ecall(_) => panic!("expected fdt report"),
         }
@@ -339,6 +458,30 @@ mod tests {
                 HostFdtDetails::OpenSbi { .. } => panic!("expected rustsbi details"),
             },
             HostHarnessResult::Ecall(_) => panic!("expected fdt report"),
+        }
+    }
+
+    #[test]
+    fn rustsbi_hsm_status_rejects_invalid_hart() {
+        let input = HostHarnessInput {
+            target_kind: HostTargetKind::RustSbi,
+            mode: HostHarnessMode::Ecall,
+            call: HostCall::new(0x4853_4d, 2, [255, 0, 0, 0, 0, 0]),
+            hart_id: 0,
+            hart_state: HostHartState::Started,
+            privilege: HostPrivilegeState::Supervisor,
+            memory_regions: Vec::new(),
+            platform_fault: HostPlatformFaultProfile::none(),
+            fdt_blob: Vec::new(),
+            label: "rustsbi-hsm-status-invalid-hart".to_string(),
+        };
+
+        let report = run(&input).expect("run rustsbi hsm status");
+        match report.result {
+            HostHarnessResult::Ecall(report) => {
+                assert_eq!(report.sbi_error, SbiError::InvalidParam.code());
+            }
+            HostHarnessResult::Fdt(_) => panic!("expected ecall report"),
         }
     }
 }

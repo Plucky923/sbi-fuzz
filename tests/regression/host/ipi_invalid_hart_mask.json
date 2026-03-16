@@ -1,0 +1,21 @@
+{
+  "target_kind": "open_sbi",
+  "mode": "ecall",
+  "call": {
+    "extid": 7557193,
+    "fid": 0,
+    "args": [16, 60, 0, 0, 0, 0]
+  },
+  "hart_id": 0,
+  "hart_state": "started",
+  "privilege": "supervisor",
+  "memory_regions": [],
+  "platform_fault": {
+    "mode": "none",
+    "error": 0,
+    "value": 0,
+    "duplicate_side_effects": false
+  },
+  "fdt_blob": [],
+  "label": "regression-ipi-invalid-hart-mask"
+}

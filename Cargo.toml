@@ -6,6 +6,11 @@ members = [
     "helper",
     "host_harness",
 ]
+default-members = [
+    "common",
+    "helper",
+    "host_harness",
+]
 
 [workspace.package]
 edition = "2024"

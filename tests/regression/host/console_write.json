@@ -1,0 +1,29 @@
+{
+  "target_kind": "rust_sbi",
+  "mode": "ecall",
+  "call": {
+    "extid": 1145193294,
+    "fid": 0,
+    "args": [4, 2147487744, 0, 0, 0, 0]
+  },
+  "hart_id": 0,
+  "hart_state": "started",
+  "privilege": "supervisor",
+  "memory_regions": [
+    {
+      "guest_addr": 2147487744,
+      "read": true,
+      "write": true,
+      "execute": false,
+      "bytes": [112, 105, 110, 103]
+    }
+  ],
+  "platform_fault": {
+    "mode": "none",
+    "error": 0,
+    "value": 0,
+    "duplicate_side_effects": false
+  },
+  "fdt_blob": [],
+  "label": "regression-console-write"
+}

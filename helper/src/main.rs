@@ -1,18 +1,21 @@
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use common::*;
 use host_harness::{FdtSeedVariant, seed_fdt_blob};
+use std::{fs, path::PathBuf, process::Command};
+
+#[cfg(feature = "qemu")]
 use std::{
-    fs,
-    path::PathBuf,
-    process::Command,
     thread,
     time::{Duration, Instant},
 };
 
 // Import modules that implement different functionalities
+#[cfg(feature = "qemu")]
 mod coverage;
 mod instrumenter;
+#[cfg(feature = "qemu")]
 mod minimizer;
+#[cfg(feature = "qemu")]
 mod runner;
 mod scenario_generator;
 mod seed_generator;
@@ -39,6 +42,8 @@ enum Commands {
     GenerateRustsbiScenarios(GenerateRustsbiScenarios),
     /// Generate sequence seeds for OpenSBI, RustSBI, or both
     GenerateSequenceSeeds(GenerateSequenceSeeds),
+    /// Export the host-side libFuzzer corpus layout under one root directory
+    ExportFuzzCorpus(ExportFuzzCorpus),
     /// Print the current exec call registry
     ListCalls,
     /// Encode a TOML input into syzkaller-style exec bytes
@@ -48,31 +53,50 @@ enum Commands {
     /// Print a human-readable description of a `.seq` sequence
     DescribeSequence(ParseBinaryInput),
     /// Print shared-memory coverage buffer information from the injector ELF
+    #[cfg(feature = "qemu")]
     CoverageInfo(CoverageInfo),
     /// Execute one input and export shared-memory coverage artifacts
+    #[cfg(feature = "qemu")]
     CollectCoverage(CollectCoverage),
     /// Internal worker subcommand used by `collect-coverage --timeout-ms`
     #[clap(hide = true)]
+    #[cfg(feature = "qemu")]
     CollectCoverageOnce(CollectCoverage),
     /// Import Linux-style sbi_ecall samples into TOML corpus seeds
     ImportLinuxCorpus(ImportLinuxCorpus),
     /// Minimize a stable-hang `.exec` into a shorter reproducer
+    #[cfg(feature = "qemu")]
     MinimizeHang(MinimizeHang),
     /// Import an `.exec` or `.toml` input into sequence format
     ImportExecAsSequence(SequenceInput),
     /// Run the SBI firmware using the given input
+    #[cfg(feature = "qemu")]
     Run(RunArgs),
     /// Internal worker subcommand used by `run --timeout-ms`
     #[clap(hide = true)]
+    #[cfg(feature = "qemu")]
     RunOnce(RunArgs),
     /// Run the SBI firmware with GDB support using the given input
+    #[cfg(feature = "qemu")]
     Debug(RunArgs),
     /// Run one host-side layered harness input
     RunHostHarness(RunHostHarness),
+    /// Replay one host-side input against both backends and emit filtered diffs
+    DiffHostHarness(RunHostHarness),
+    /// Convert one host-harness crash/input into an `.exec` program when possible
+    ConvertHostCrashToExec(ConvertHostCrashToExec),
     /// Run one sequence input against a host-harness backend
     RunSequence(RunSequence),
     /// Run one sequence input against both host-harness backends and diff the result
     DiffSequence(DiffSequence),
+    /// Minimize a host-side sequence that triggers a spec or memory violation
+    MinimizeSpecViolation(MinimizeSpecViolation),
+    /// Internal helper to keep selected exec instructions for analysis
+    #[clap(hide = true)]
+    SliceExec(SliceExec),
+    /// Internal helper to patch one exec call/setprops value for analysis
+    #[clap(hide = true)]
+    PatchExecValue(PatchExecValue),
     /// Instrument SBI firmware source code with KASAN (support OpenSBI)
     InstrumentKasan(InstrumentKasan),
     /// Parse the input from a binary file
@@ -149,6 +173,12 @@ struct GenerateSequenceSeeds {
     output: PathBuf,
 }
 
+#[derive(Args)]
+struct ExportFuzzCorpus {
+    /// Output root for the host-side fuzz corpus tree
+    output: PathBuf,
+}
+
 /// Arguments for Linux corpus import
 #[derive(Args)]
 struct ImportLinuxCorpus {
@@ -160,6 +190,7 @@ struct ImportLinuxCorpus {
 }
 
 /// Arguments for coverage buffer inspection
+#[cfg(feature = "qemu")]
 #[derive(Args)]
 struct CoverageInfo {
     /// Path to the injector ELF
@@ -177,6 +208,7 @@ struct SequenceInput {
 }
 
 /// Arguments for both Run and Debug commands
+#[cfg(feature = "qemu")]
 #[derive(Args)]
 struct RunArgs {
     /// Specify the target program (binary format, e.g. "fw_dynamic.bin")
@@ -208,6 +240,15 @@ struct RunHostHarness {
 }
 
 #[derive(Args)]
+struct ConvertHostCrashToExec {
+    /// Host harness input file (`.host`, JSON, or raw fuzz crash)
+    input: PathBuf,
+
+    /// Output `.exec` file
+    output: PathBuf,
+}
+
+#[derive(Args)]
 struct RunSequence {
     /// Sequence input file (`.seq` or JSON)
     input: PathBuf,
@@ -231,7 +272,59 @@ struct DiffSequence {
     json_out: Option<PathBuf>,
 }
 
+#[derive(Args)]
+struct MinimizeSpecViolation {
+    /// Sequence input file (`.seq` or JSON)
+    input: PathBuf,
+
+    /// Backend implementation to execute
+    #[arg(long, value_enum)]
+    target_kind: HostTargetCli,
+
+    /// Output path for the minimized sequence (`.seq` or JSON)
+    output: PathBuf,
+
+    /// Optional JSON summary output path
+    #[arg(long)]
+    json_out: Option<PathBuf>,
+}
+
+#[derive(Args)]
+struct SliceExec {
+    /// Input `.exec` program
+    input: PathBuf,
+
+    /// Output `.exec` program
+    output: PathBuf,
+
+    /// Comma-separated instruction indexes to keep, e.g. `0,1,4`
+    #[arg(long)]
+    keep: String,
+}
+
+#[derive(Args)]
+struct PatchExecValue {
+    /// Input `.exec` program
+    input: PathBuf,
+
+    /// Output `.exec` program
+    output: PathBuf,
+
+    /// Instruction index to patch
+    #[arg(long)]
+    instr: usize,
+
+    /// Argument index for call instructions, or `0` for setprops value
+    #[arg(long)]
+    arg: usize,
+
+    /// Replacement value, decimal or `0x` hexadecimal
+    #[arg(long)]
+    value: String,
+}
+
 /// Arguments for stable-hang minimization
+#[cfg(feature = "qemu")]
 #[derive(Args)]
 struct MinimizeHang {
     /// Specify the target program (binary format, e.g. "fw_dynamic.bin")
@@ -264,6 +357,7 @@ struct MinimizeHang {
 }
 
 /// Arguments for shared coverage collection
+#[cfg(feature = "qemu")]
 #[derive(Args)]
 struct CollectCoverage {
     /// Specify the target program (binary format, e.g. "fw_dynamic.bin")
@@ -346,6 +440,12 @@ fn main() {
                 std::process::exit(1);
             }
         }
+        Commands::ExportFuzzCorpus(args) => {
+            if let Err(err) = export_fuzz_corpus(args.output) {
+                eprintln!("export-fuzz-corpus failed: {err}");
+                std::process::exit(1);
+            }
+        }
         Commands::ListCalls => {
             list_calls();
         }
@@ -364,12 +464,15 @@ fn main() {
                 std::process::exit(1);
             }
         }
+        #[cfg(feature = "qemu")]
         Commands::CoverageInfo(args) => {
             coverage::print_shared_coverage_info(args.injector);
         }
+        #[cfg(feature = "qemu")]
         Commands::CollectCoverage(args) => {
             collect_coverage_with_optional_timeout(args);
         }
+        #[cfg(feature = "qemu")]
         Commands::CollectCoverageOnce(args) => {
             runner::collect_coverage(
                 args.target,
@@ -384,6 +487,7 @@ fn main() {
         Commands::ImportLinuxCorpus(args) => {
             import_linux_corpus(args.source, args.output);
         }
+        #[cfg(feature = "qemu")]
         Commands::MinimizeHang(args) => {
             if let Err(err) = minimizer::minimize_hang(
                 args.target,
@@ -405,18 +509,30 @@ fn main() {
                 std::process::exit(1);
             }
         }
+        #[cfg(feature = "qemu")]
         Commands::Run(args) => {
             run_with_optional_timeout(args);
         }
+        #[cfg(feature = "qemu")]
         Commands::RunOnce(args) => {
             runner::run(args.target, args.injector, args.input, args.smp);
         }
+        #[cfg(feature = "qemu")]
         Commands::Debug(args) => {
             // Run the target firmware with GDB debugging support
             runner::debug(args.target, args.injector, args.input, args.smp);
         }
         Commands::RunHostHarness(args) => {
             run_host_harness(args.input, args.json_out);
+        }
+        Commands::DiffHostHarness(args) => {
+            diff_host_harness(args.input, args.json_out);
+        }
+        Commands::ConvertHostCrashToExec(args) => {
+            if let Err(err) = convert_host_crash_to_exec(args.input, args.output) {
+                eprintln!("convert-host-crash-to-exec failed: {err}");
+                std::process::exit(1);
+            }
         }
         Commands::RunSequence(args) => {
             let target_kind = match args.target_kind {
@@ -436,6 +552,33 @@ fn main() {
                 std::process::exit(1);
             }
         }
+        Commands::MinimizeSpecViolation(args) => {
+            let target_kind = match args.target_kind {
+                HostTargetCli::Opensbi => HostTargetKind::OpenSbi,
+                HostTargetCli::Rustsbi => HostTargetKind::RustSbi,
+            };
+            if let Err(err) = sequence_runner::minimize_spec_violation(
+                args.input,
+                target_kind,
+                args.output,
+                args.json_out,
+            ) {
+                eprintln!("minimize-spec-violation failed: {err}");
+                std::process::exit(1);
+            }
+        }
+        Commands::SliceExec(args) => {
+            if let Err(err) = slice_exec(args.input, args.output, args.keep) {
+                eprintln!("slice-exec failed: {err}");
+                std::process::exit(1);
+            }
+        }
+        Commands::PatchExecValue(args) => {
+            if let Err(err) = patch_exec_value(args.input, args.output, args.instr, args.arg, args.value) {
+                eprintln!("patch-exec-value failed: {err}");
+                std::process::exit(1);
+            }
+        }
         Commands::InstrumentKasan(args) => {
             // Instrument the target source code with KASAN
             instrumenter::instrument_kasan(args.path);
@@ -447,6 +590,7 @@ fn main() {
     }
 }
 
+#[cfg(feature = "qemu")]
 fn run_with_optional_timeout(args: RunArgs) {
     let Some(timeout_ms) = args.timeout_ms.filter(|value| *value > 0) else {
         runner::run(args.target, args.injector, args.input, args.smp);
@@ -483,6 +627,7 @@ fn run_with_optional_timeout(args: RunArgs) {
     }
 }
 
+#[cfg(feature = "qemu")]
 fn collect_coverage_with_optional_timeout(args: CollectCoverage) {
     let Some(timeout_ms) = args.timeout_ms.filter(|value| *value > 0) else {
         runner::collect_coverage(
@@ -634,6 +779,92 @@ fn encode_exec_input(input: PathBuf) {
     println!("Wrote {:?}", output_path);
 }
 
+fn slice_exec(input: PathBuf, output: PathBuf, keep: String) -> Result<(), String> {
+    let raw = fs::read(&input).map_err(|err| err.to_string())?;
+    let program = exec_program_from_bytes(&raw)?;
+    let keep_indexes = keep
+        .split(',')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .map(|part| {
+            part.parse::<usize>()
+                .map_err(|err| format!("invalid instruction index `{part}`: {err}"))
+        })
+        .collect::<Result<std::collections::BTreeSet<_>, _>>()?;
+    if keep_indexes.is_empty() {
+        return Err("slice-exec requires at least one instruction index".to_string());
+    }
+
+    let instructions = program
+        .instructions
+        .into_iter()
+        .enumerate()
+        .filter_map(|(index, instr)| keep_indexes.contains(&index).then_some(instr))
+        .collect::<Vec<_>>();
+    if instructions.is_empty() {
+        return Err("slice-exec produced an empty program".to_string());
+    }
+    let sliced = ExecProgram { instructions };
+    validate_exec_program(&sliced)?;
+    fs::write(&output, exec_program_to_bytes(&sliced)).map_err(|err| err.to_string())?;
+    println!("Wrote {}", output.display());
+    Ok(())
+}
+
+fn patch_exec_value(
+    input: PathBuf,
+    output: PathBuf,
+    instr: usize,
+    arg: usize,
+    value: String,
+) -> Result<(), String> {
+    let raw = fs::read(&input).map_err(|err| err.to_string())?;
+    let mut program = exec_program_from_bytes(&raw)?;
+    let parsed = if let Some(hex) = value.strip_prefix("0x").or_else(|| value.strip_prefix("0X")) {
+        u64::from_str_radix(hex, 16).map_err(|err| format!("invalid hex value `{value}`: {err}"))?
+    } else {
+        value
+            .parse::<u64>()
+            .map_err(|err| format!("invalid value `{value}`: {err}"))?
+    };
+
+    let instr_ref = program
+        .instructions
+        .get_mut(instr)
+        .ok_or_else(|| format!("instruction index {instr} out of range"))?;
+    match instr_ref {
+        ExecInstr::Call { args, .. } => {
+            let arg_ref = args
+                .get_mut(arg)
+                .ok_or_else(|| format!("arg index {arg} out of range for call[{instr}]"))?;
+            match arg_ref {
+                ExecArg::Const { value, .. } => *value = parsed,
+                other => {
+                    return Err(format!(
+                        "call[{instr}] arg[{arg}] is not a const arg: {other:?}"
+                    ))
+                }
+            }
+        }
+        ExecInstr::SetProps { value } => {
+            if arg != 0 {
+                return Err("setprops only supports --arg 0".to_string());
+            }
+            *value = parsed;
+        }
+        other => {
+            return Err(format!(
+                "instruction[{instr}] is not patchable by patch-exec-value: {other:?}"
+            ))
+        }
+    }
+
+    validate_exec_program(&program)?;
+    fs::write(&output, exec_program_to_bytes(&program)).map_err(|err| err.to_string())?;
+    println!("Wrote {}", output.display());
+    Ok(())
+}
+
 fn load_sequence_target_hint(path: &PathBuf) -> Option<HostTargetKind> {
     let raw = fs::read(path).ok()?;
     if raw.starts_with(SEQUENCE_MAGIC) {
@@ -724,10 +955,56 @@ fn generate_host_seeds(target_kind: HostTargetCli, mode: HostSeedMode, output: P
     );
 }
 
+fn export_fuzz_corpus(output: PathBuf) -> Result<(), String> {
+    let opensbi_ecall = output.join("fuzz_ecall_opensbi");
+    let rustsbi_ecall = output.join("fuzz_ecall_rustsbi");
+    let sequence_both = output.join("fuzz_sequence_both");
+    let diff_ecall = output.join("fuzz_diff_ecall");
+    let diff_sequence = output.join("fuzz_diff_sequence");
+    let smoke = output.join("fuzz_harness_smoke");
+
+    generate_host_seeds(HostTargetCli::Opensbi, HostSeedMode::Ecall, opensbi_ecall.clone());
+    generate_host_seeds(HostTargetCli::Rustsbi, HostSeedMode::Ecall, rustsbi_ecall.clone());
+    sequence_runner::generate_sequence_seeds(sequence_both.clone(), true, true)?;
+
+    fs::create_dir_all(&diff_ecall).map_err(|err| err.to_string())?;
+    fs::create_dir_all(&diff_sequence).map_err(|err| err.to_string())?;
+    fs::create_dir_all(&smoke).map_err(|err| err.to_string())?;
+
+    copy_dir_files(&opensbi_ecall, &diff_ecall, "host")?;
+    copy_dir_files(&rustsbi_ecall, &diff_ecall, "host")?;
+    copy_dir_files(&sequence_both, &diff_sequence, "seq")?;
+    fs::write(smoke.join("smoke_crash"), b"SBI_FUZZ_SMOKE_CRASH").map_err(|err| err.to_string())?;
+    println!("Exported host fuzz corpus to {}", output.display());
+    Ok(())
+}
+
+fn copy_dir_files(source: &PathBuf, target: &PathBuf, extension: &str) -> Result<(), String> {
+    for entry in fs::read_dir(source).map_err(|err| err.to_string())? {
+        let entry = entry.map_err(|err| err.to_string())?;
+        let path = entry.path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some(extension) {
+            continue;
+        }
+        let file_name = path
+            .file_name()
+            .ok_or_else(|| format!("missing file name for {}", path.display()))?;
+        fs::copy(&path, target.join(file_name)).map_err(|err| err.to_string())?;
+    }
+    Ok(())
+}
+
 fn run_host_harness(input_path: PathBuf, json_out: Option<PathBuf>) {
     let input = load_host_harness_input(&input_path);
+    let mem_oracle = MemoryOracle::snapshot_before(&input.memory_regions);
     let report = host_harness::run(&input).expect("run host harness input");
-    let json = serde_json::to_string_pretty(&report).expect("serialize host harness report");
+    let analysis = HostHarnessAnalysis {
+        input: input.clone(),
+        spec_violations: check_host_report(&input, &report).violations,
+        memory_violations: mem_oracle.check_after(&input, &report),
+        report,
+    };
+    let json = serde_json::to_string_pretty(&analysis).expect("serialize host harness report");
     if let Some(json_out) = json_out {
         fs::write(&json_out, format!("{json}\n"))
             .expect(format!("write host harness json: {:?}", &json_out).as_str());
@@ -735,13 +1012,179 @@ fn run_host_harness(input_path: PathBuf, json_out: Option<PathBuf>) {
     println!("{json}");
 }
 
+fn diff_host_harness(input_path: PathBuf, json_out: Option<PathBuf>) {
+    let mut input = load_host_harness_input(&input_path);
+    input.mode = HostHarnessMode::Ecall;
+    input.platform_fault = HostPlatformFaultProfile::none();
+    input.fdt_blob.clear();
+
+    let mut opensbi_input = input.clone();
+    opensbi_input.target_kind = HostTargetKind::OpenSbi;
+    let mut rustsbi_input = input.clone();
+    rustsbi_input.target_kind = HostTargetKind::RustSbi;
+
+    let opensbi = host_harness::run(&opensbi_input).expect("run opensbi host diff input");
+    let rustsbi = host_harness::run(&rustsbi_input).expect("run rustsbi host diff input");
+    let diffs = diff_host_reports(&opensbi_input, &opensbi, &rustsbi, &DiffPolicy::default());
+    let analysis = HostHarnessDiffAnalysis {
+        input,
+        opensbi,
+        rustsbi,
+        diffs,
+    };
+    let json = serde_json::to_string_pretty(&analysis).expect("serialize host harness diff");
+    if let Some(json_out) = json_out {
+        fs::write(&json_out, format!("{json}\n"))
+            .expect(format!("write host harness diff json: {:?}", &json_out).as_str());
+    }
+    println!("{json}");
+}
+
+#[derive(serde::Serialize)]
+struct HostHarnessAnalysis {
+    input: HostHarnessInput,
+    report: host_harness::HostHarnessReport,
+    spec_violations: Vec<SpecViolation>,
+    memory_violations: Vec<MemoryViolation>,
+}
+
+#[derive(serde::Serialize)]
+struct HostHarnessDiffAnalysis {
+    input: HostHarnessInput,
+    opensbi: host_harness::HostHarnessReport,
+    rustsbi: host_harness::HostHarnessReport,
+    diffs: Vec<DiffResult>,
+}
+
 fn load_host_harness_input(path: &PathBuf) -> HostHarnessInput {
     let raw = fs::read(path).expect("read host harness input");
     if let Ok(input) = host_harness_input_from_bytes(&raw) {
         return input;
     }
-    let json = String::from_utf8(raw).expect("host harness JSON should be UTF-8");
-    serde_json::from_str(&json).expect("parse host harness JSON input")
+    if let Ok(json) = String::from_utf8(raw.clone()) {
+        if let Ok(input) = serde_json::from_str(&json) {
+            return input;
+        }
+    }
+    HostHarnessInput::from_fuzz_bytes(&raw)
+}
+
+fn convert_host_crash_to_exec(input_path: PathBuf, output: PathBuf) -> Result<(), String> {
+    let input = load_host_harness_input(&input_path);
+    if input.mode == HostHarnessMode::Fdt {
+        return Err("FDT host inputs cannot be lowered into .exec".to_string());
+    }
+    if input.platform_fault.mode != HostPlatformFaultMode::None {
+        return Err(
+            "platform fault host inputs are host-specific and cannot be lowered into .exec"
+                .to_string(),
+        );
+    }
+
+    let program = host_input_to_sequence_program(&input)?;
+    let exec = common::sequence_program_to_exec(&program)?;
+    fs::write(&output, common::exec_program_to_bytes(&exec)).map_err(|err| err.to_string())?;
+    println!("Wrote {}", output.display());
+    Ok(())
+}
+
+fn host_input_to_sequence_program(input: &HostHarnessInput) -> Result<SequenceProgram, String> {
+    let mut memory = Vec::new();
+    let mut matched_objects = [None, None, None, None, None, None];
+    for (index, region) in input.memory_regions.iter().enumerate() {
+        let id = format!("mem{index}");
+        for (arg_index, arg) in input.call.args.iter().enumerate() {
+            if *arg == region.guest_addr || *arg == region.bytes.len() as u64 {
+                matched_objects[arg_index] = Some(id.clone());
+            }
+        }
+        memory.push(SequenceMemoryObject {
+            id,
+            slot_offset: (index as u64) * 0x100,
+            guest_addr: Some(region.guest_addr),
+            read: region.read,
+            write: region.write,
+            execute: region.execute,
+            bytes: region.bytes.clone(),
+        });
+    }
+
+    let schema = get_call_schema(input.call.extid, input.call.fid);
+    let args = (0..6)
+        .map(|index| {
+            let value = input.call.args[index];
+            let object = matched_objects[index].clone();
+            match schema.argument_kind(index) {
+                ArgumentKind::Address => object
+                    .map(|object| SequenceArg::MemoryAddr { object })
+                    .unwrap_or(SequenceArg::Const { value }),
+                ArgumentKind::HartMaskAddress => SequenceArg::Const { value },
+                ArgumentKind::AddressLow => object
+                    .map(|object| SequenceArg::MemoryAddrLow { object })
+                    .unwrap_or(SequenceArg::Const { value }),
+                ArgumentKind::AddressHigh => {
+                    if value == 0 {
+                        matched_objects[index.saturating_sub(1)]
+                            .clone()
+                            .map(|object| SequenceArg::MemoryAddrHigh { object })
+                            .unwrap_or(SequenceArg::Const { value })
+                    } else {
+                        SequenceArg::Const { value }
+                    }
+                }
+                ArgumentKind::Size | ArgumentKind::Count => object
+                    .map(|object| SequenceArg::MemoryLen { object })
+                    .unwrap_or(SequenceArg::Const { value }),
+                _ => SequenceArg::Const { value },
+            }
+        })
+        .collect::<Vec<_>>();
+
+    let mut steps = Vec::new();
+    if input.hart_id != 0 {
+        steps.push(SequenceStep::SetTargetHart {
+            hart_id: input.hart_id,
+        });
+    }
+    if input.hart_state != HostHartState::Started {
+        steps.push(SequenceStep::SetHartState {
+            hart_id: input.hart_id,
+            state: input.hart_state,
+        });
+    }
+    if input.privilege != HostPrivilegeState::Supervisor {
+        steps.push(SequenceStep::SetPrivilege {
+            privilege: input.privilege,
+        });
+    }
+    steps.push(SequenceStep::Call {
+        label: if input.label.trim().is_empty() {
+            format!("host-{:x}-{:x}", input.call.extid, input.call.fid)
+        } else {
+            input.label.clone()
+        },
+        eid: input.call.extid,
+        fid: input.call.fid,
+        args,
+        expect: None,
+    });
+
+    let program = SequenceProgram {
+        metadata: SequenceMetadata {
+            name: input.label.clone(),
+            source: format!("host-crash:{}", input.hash_string()),
+            note: String::new(),
+        },
+        env: SequenceEnv {
+            smp: (input.hart_id as u16).saturating_add(1).max(1),
+            impl_hint: Some(input.target_kind),
+            platform: "host-converted".to_string(),
+        },
+        memory,
+        steps,
+    };
+    common::validate_sequence_program(&program)?;
+    Ok(program)
 }
 
 fn host_opensbi_ecall_seeds() -> Vec<(String, HostHarnessInput)> {

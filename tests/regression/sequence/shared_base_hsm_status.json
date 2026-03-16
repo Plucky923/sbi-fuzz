@@ -1,0 +1,42 @@
+{
+  "metadata": {
+    "name": "regression-shared-base-hsm-status",
+    "source": "regression",
+    "note": "Base identity and HSM status should match or be capability-only differences."
+  },
+  "env": {
+    "smp": 2,
+    "platform": "host-regression"
+  },
+  "memory": [],
+  "steps": [
+    {
+      "kind": "call",
+      "label": "base-get-spec-version",
+      "eid": 16,
+      "fid": 0,
+      "args": [
+        {"kind": "const", "value": 0},
+        {"kind": "const", "value": 0},
+        {"kind": "const", "value": 0},
+        {"kind": "const", "value": 0},
+        {"kind": "const", "value": 0},
+        {"kind": "const", "value": 0}
+      ]
+    },
+    {
+      "kind": "call",
+      "label": "hsm-hart-status",
+      "eid": 4739917,
+      "fid": 2,
+      "args": [
+        {"kind": "const", "value": 0},
+        {"kind": "const", "value": 0},
+        {"kind": "const", "value": 0},
+        {"kind": "const", "value": 0},
+        {"kind": "const", "value": 0},
+        {"kind": "const", "value": 0}
+      ]
+    }
+  ]
+}

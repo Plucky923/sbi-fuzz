@@ -103,7 +103,9 @@ struct RustSbiAdapter {
 struct BackendState {
     memory_regions: Vec<HostMemoryRegion>,
     platform_fault: HostPlatformFaultProfile,
+    hart_id: u64,
     hart_state: HostHartState,
+    modeled_harts: u64,
     side_effects: u32,
     console_bytes: u32,
     timer_value: u64,
@@ -114,7 +116,9 @@ impl BackendState {
         Self {
             memory_regions: input.memory_regions.clone(),
             platform_fault: input.platform_fault,
+            hart_id: input.hart_id,
             hart_state: input.hart_state,
+            modeled_harts: 64,
             side_effects: 0,
             console_bytes: 0,
             timer_value: 0,
@@ -361,7 +365,7 @@ impl Hsm for MockHsm {
         state.success_or_fault(0, true)
     }
 
-    fn hart_get_status(&self, _hartid: usize) -> SbiRet {
+    fn hart_get_status(&self, hartid: usize) -> SbiRet {
         let mut state = self.state.0.borrow_mut();
         if matches!(
             state.platform_fault.mode,
@@ -369,7 +373,15 @@ impl Hsm for MockHsm {
         ) {
             return state.success_or_fault(0, false);
         }
-        let value = match state.hart_state {
+        if hartid as u64 >= state.modeled_harts {
+            return SbiRet::invalid_param();
+        }
+        let target_state = if hartid as u64 == state.hart_id {
+            state.hart_state
+        } else {
+            HostHartState::Stopped
+        };
+        let value = match target_state {
             HostHartState::Unknown | HostHartState::Started => 0,
             HostHartState::Stopped => 1,
             HostHartState::Suspended => 4,
@@ -559,6 +571,7 @@ fn run_ecall(input: &HostHarnessInput) -> Result<HostHarnessReport, String> {
         mode: input.mode,
         classification,
         signature,
+        post_memory_regions: state.memory_regions.clone(),
         result: HostHarnessResult::Ecall(HostEcallReport {
             extid: input.call.extid,
             fid: input.call.fid,
@@ -611,6 +624,7 @@ fn run_fdt(input: &HostHarnessInput) -> Result<HostHarnessReport, String> {
         mode: HostHarnessMode::Fdt,
         classification,
         signature,
+        post_memory_regions: Vec::new(),
         result: HostHarnessResult::Fdt(HostFdtReport {
             status: response.status,
             model: c_buf_to_string(&response.model),

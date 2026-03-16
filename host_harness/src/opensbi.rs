@@ -170,6 +170,7 @@ fn run_ecall(input: &HostHarnessInput) -> Result<HostHarnessReport, String> {
         mode: input.mode,
         classification,
         signature,
+        post_memory_regions: input.memory_regions.clone(),
         result: HostHarnessResult::Ecall(HostEcallReport {
             extid: input.call.extid,
             fid: input.call.fid,
@@ -214,6 +215,7 @@ fn run_fdt(input: &HostHarnessInput) -> Result<HostHarnessReport, String> {
         mode: HostHarnessMode::Fdt,
         classification,
         signature,
+        post_memory_regions: Vec::new(),
         result: HostHarnessResult::Fdt(HostFdtReport {
             status: response.status,
             model: c_buf_to_string(&response.model),

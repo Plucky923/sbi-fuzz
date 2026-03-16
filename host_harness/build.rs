@@ -28,6 +28,7 @@ fn opensbi_root(manifest_dir: &Path) -> PathBuf {
 
 fn main() {
     println!("cargo:rerun-if-env-changed=SBIFUZZ_OPENSBI_ROOT");
+    println!("cargo:rerun-if-env-changed=SBIFUZZ_HOST_C_SANITIZERS");
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("manifest dir"));
     let opensbi = opensbi_root(&manifest_dir);
     let native_dir = manifest_dir.join("src/native");
@@ -90,6 +91,14 @@ fn main() {
         .define("OPENSBI_VERSION_MAJOR", "1")
         .define("OPENSBI_VERSION_MINOR", "6")
         .warnings(false);
+
+    if let Ok(sanitizers) = env::var("SBIFUZZ_HOST_C_SANITIZERS") {
+        let sanitizers = sanitizers.trim();
+        if !sanitizers.is_empty() {
+            build.flag(&format!("-fsanitize={sanitizers}"));
+            build.flag("-fno-omit-frame-pointer");
+        }
+    }
 
     for source in &ecall_sources {
         build.file(opensbi.join(source));
