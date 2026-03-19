@@ -55,14 +55,31 @@ def extract_items(source: str, data: dict) -> list[dict]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Cross-layer deduplicate host/sequence/QEMU reports")
-    parser.add_argument("inputs", nargs="+", type=Path)
+    parser.add_argument("inputs", nargs="*", type=Path)
+    parser.add_argument(
+        "--source",
+        action="append",
+        default=[],
+        help="Explicit source label and path in the form label=path",
+    )
     parser.add_argument("--json-out", type=Path)
     args = parser.parse_args()
 
     grouped: dict[str, list[dict]] = defaultdict(list)
-    for path in args.inputs:
+    explicit_sources: list[tuple[str, Path]] = []
+    for item in args.source:
+        if "=" not in item:
+            raise SystemExit(f"invalid --source value {item!r}; expected label=path")
+        label, raw_path = item.split("=", 1)
+        explicit_sources.append((label, Path(raw_path)))
+
+    inputs = explicit_sources or [(path.stem, path) for path in args.inputs]
+    if not inputs:
+        raise SystemExit("no input reports provided")
+
+    for source, path in inputs:
         data = json.loads(path.read_text())
-        for item in extract_items(path.stem, data):
+        for item in extract_items(source, data):
             grouped[item["signature"]].append(item)
 
     summary = {
