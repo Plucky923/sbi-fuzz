@@ -6,12 +6,15 @@ sbifuzz is a fuzzing framework designed to test RISC-V SBI (Supervisor Binary In
 
 ```
 sbifuzz/
-├── common/          # Common libraries and utility functions
-├── fuzzer/          # Core fuzzing logic
-├── helper/          # Helper tools (seed generation, runners, etc.)
-├── injector/        # Injector implementations
-├── playground/      # Examples and test cases
-└── Dockerfile.dev   # Development environment Dockerfile
+├── common/                 # Shared wire formats, schema registry, oracle helpers
+├── host_harness/           # Host-side OpenSBI/RustSBI harness and cargo-fuzz targets
+├── helper/                 # CLI for seed generation, replay, sequence runs, triage helpers
+├── config/                 # Locked doc revisions, schemas, and campaign profiles
+├── scripts/                # Campaign, triage, metrics, and regression automation
+├── playground/             # System-level OpenSBI/RustSBI/QEMU entry points
+├── fuzzer/                 # QEMU/system-level fuzzing loop
+├── injector/               # Injector implementations
+└── Dockerfile.dev          # Development environment Dockerfile
 ```
 
 ## Key Features
@@ -25,7 +28,25 @@ sbifuzz/
 
 ## Quick Start
 
-To get started with fuzzing RustSBI:
+Recommended flow:
+
+1. Validate the host-side harness first for fast replay and fuzzing iteration.
+2. Escalate to the QEMU/system-level playgrounds only after the host-side path is healthy.
+
+For a fresh machine that does not yet have an OpenSBI source tree prepared, validate the RustSBI-only host path first:
+
+```bash
+cargo test -p common -p host_harness --no-default-features --features host-rustsbi
+```
+
+To enable the full host-side harness with both RustSBI and OpenSBI backends:
+
+```bash
+make -C playground/opensbi-fuzz prepare
+make test-host-harness
+```
+
+To move up to the system-level RustSBI playground:
 
 ```bash
 cd playground/rustsbi-fuzz
@@ -134,11 +155,13 @@ make host-fuzz-corpus
 make host-fuzz-smoke
 ```
 
-This smoke run performs three checks in order:
+This smoke run performs five checks in order:
 
 1. an intentional `fuzz_harness_smoke` crash to verify the libFuzzer crash/artifact pipeline;
 2. a short single-worker `fuzz_ecall_opensbi` run;
-3. a short single-worker `fuzz_ecall_rustsbi` and `fuzz_sequence_both` run.
+3. a short single-worker `fuzz_ecall_rustsbi` run;
+4. a short single-worker `fuzz_sequence_both` run;
+5. short single-worker `fuzz_diff_ecall` and `fuzz_diff_sequence` runs.
 
 To launch the long-running 60-worker RustSBI host-side campaign after the smokes pass:
 
@@ -156,6 +179,14 @@ To run the host-side differential target that compares OpenSBI and RustSBI on th
 
 ```bash
 make host-fuzz-diff
+```
+
+To summarize a host-side campaign and enforce the quality gate:
+
+```bash
+make triage-host-fuzz
+make collect-metrics
+make quality-gate
 ```
 
 The sequence-oriented host-side targets now accept `SBIFUZZ_HOST_SEQUENCE_SMP`, so `make host-fuzz-60-complex` drives structured `.seq` inputs with up to 60 modeled harts instead of the older fixed 4-hart topology. Host-side fuzz runs also disable LeakSanitizer by default (`SBIFUZZ_HOST_FUZZ_DETECT_LEAKS=0`) because this environment trips the known `LeakSanitizer does not work under ptrace` fatal and otherwise turns clean runs into false crashes.
