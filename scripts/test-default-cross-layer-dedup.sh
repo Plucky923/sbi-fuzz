@@ -8,7 +8,7 @@ trap 'rm -rf "$tmp_dir"' EXIT
 cp "$repo_root/Makefile" "$tmp_dir/Makefile"
 cp -R "$repo_root/scripts" "$tmp_dir/scripts"
 
-mkdir -p "$tmp_dir/output/host_fuzz" "$tmp_dir/output/sequence/campaigns/seq-run" "$tmp_dir/output/bugs"
+mkdir -p "$tmp_dir/output/host_fuzz" "$tmp_dir/output/sequence/campaigns/seq-run" "$tmp_dir/playground/opensbi-fuzz/output/bugs"
 
 cat >"$tmp_dir/output/host_fuzz/triage.json" <<'JSON'
 {
@@ -40,7 +40,7 @@ cat >"$tmp_dir/output/sequence/campaigns/seq-run/triage.json" <<'JSON'
 }
 JSON
 
-cat >"$tmp_dir/output/bugs/result.bugs.json" <<'JSON'
+cat >"$tmp_dir/playground/opensbi-fuzz/output/bugs/result.bugs.json" <<'JSON'
 {
   "buckets": {
     "qemu-a": {
@@ -52,6 +52,21 @@ cat >"$tmp_dir/output/bugs/result.bugs.json" <<'JSON'
       "input": "output/bugs/qemu.exec"
     }
   }
+}
+JSON
+
+cat >"$tmp_dir/playground/opensbi-fuzz/output/bugs/result.replay.json" <<'JSON'
+{
+  "results": [
+    {
+      "target_kind": "rustsbi",
+      "eid": 16,
+      "fid": 0,
+      "classification": "replay_only",
+      "signature": "should-not-be-consumed",
+      "input": "output/bugs/ignored.exec"
+    }
+  ]
 }
 JSON
 
@@ -68,6 +83,7 @@ assert bug["sources"] == ["host", "qemu", "sequence"], bug
 assert bug["source_reproducers"]["host"] == "output/host_fuzz/a.json", bug
 assert bug["source_reproducers"]["sequence"] == "output/sequence/seq.json", bug
 assert bug["source_reproducers"]["qemu"] == "output/bugs/qemu.exec", bug
+assert "output/bugs/ignored.exec" not in bug["reproducers"], bug
 PY
 
 echo "default cross-layer dedup test passed"
