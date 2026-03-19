@@ -80,17 +80,24 @@ def summarize_triage(paths: list[Path]) -> dict | None:
         return None
     total_buckets = 0
     total_results = 0
+    confirmed_cases = 0
     violation_counts = defaultdict(int)
     for path in paths:
         data = json.loads(path.read_text())
         total_buckets += len(data.get("buckets", {}))
         total_results += len(data.get("results", []))
+        confirmed_cases += sum(1 for entry in data.get("results", []) if entry.get("confirmed"))
         for key, value in data.get("by_violation_type", {}).items():
             violation_counts[key] += value
     return {
         "inputs": [str(path) for path in paths],
         "total_buckets": total_buckets,
         "total_results": total_results,
+        "confirmed_cases": confirmed_cases,
+        "confirmed_ratio": (
+            round(confirmed_cases / total_results, 4) if total_results else None
+        ),
+        "unique_violation_types": len(violation_counts),
         "by_violation_type": dict(sorted(violation_counts.items())),
     }
 
@@ -100,14 +107,24 @@ def summarize_cross_layer(paths: list[Path]) -> dict | None:
         return None
     total_unique = 0
     total_bugs = 0
+    cross_layer_confirmed = 0
     for path in paths:
         data = json.loads(path.read_text())
         total_unique += int(data.get("total_unique", 0))
-        total_bugs += len(data.get("bugs", {}))
+        bugs = data.get("bugs", {})
+        total_bugs += len(bugs)
+        cross_layer_confirmed += sum(
+            1 for bug in bugs.values() if len(set(bug.get("sources", []))) >= 2
+        )
     return {
         "inputs": [str(path) for path in paths],
         "total_unique": total_unique,
         "total_bugs": total_bugs,
+        "cross_layer_confirmed": cross_layer_confirmed,
+        "cross_layer_confirmation_rate": (
+            round(cross_layer_confirmed / total_unique, 4) if total_unique else None
+        ),
+        "single_layer_only": max(total_unique - cross_layer_confirmed, 0),
     }
 
 
