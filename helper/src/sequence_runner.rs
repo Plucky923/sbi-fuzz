@@ -1,7 +1,7 @@
 use common::{
     HostCall, HostHarnessInput, HostHarnessMode, HostHartState, HostMemoryRegion,
     HostPlatformFaultProfile, HostPrivilegeState, HostTargetKind,
-    HsmOp, HsmStateTracker, MemoryOracle, SequenceArg, SequenceFdtExpectation,
+    DiffPolicy, HsmOp, HsmStateTracker, MemoryOracle, SequenceArg, SequenceFdtExpectation,
     SequenceMemoryObject, SequenceProgram, SequenceStep, check_host_report, generate_seed_variants,
     sequence_memory_guest_addr, sequence_program_describe, sequence_program_from_bytes,
     sequence_program_from_exec, sequence_program_from_semantic_input,
@@ -18,6 +18,8 @@ pub struct SequenceStepReport {
     pub index: usize,
     pub kind: String,
     pub label: String,
+    pub eid: Option<u64>,
+    pub fid: Option<u64>,
     pub classification: String,
     pub signature: String,
     pub expectation_ok: bool,
@@ -744,6 +746,8 @@ fn state_only_step(
         index,
         kind: kind.to_string(),
         label,
+        eid: None,
+        fid: None,
         classification: "ok".to_string(),
         signature: state.state_signature(),
         expectation_ok: true,
@@ -817,6 +821,14 @@ fn call_step_report(
         } else {
             label.to_string()
         },
+        eid: Some(match &host_report.result {
+            HostHarnessResult::Ecall(report) => report.extid,
+            HostHarnessResult::Fdt(_) => 0,
+        }),
+        fid: Some(match &host_report.result {
+            HostHarnessResult::Ecall(report) => report.fid,
+            HostHarnessResult::Fdt(_) => 0,
+        }),
         classification: classification.clone(),
         signature,
         expectation_ok,
@@ -880,6 +892,8 @@ fn fdt_step_report(
         } else {
             label.to_string()
         },
+        eid: None,
+        fid: None,
         classification: classification.clone(),
         signature,
         expectation_ok,
@@ -965,6 +979,7 @@ fn diff_sequence_reports(
     opensbi: SequenceRunReport,
     rustsbi: SequenceRunReport,
 ) -> SequenceDiffReport {
+    let policy = DiffPolicy::default();
     let mut compared_steps = 0_usize;
     let mut mismatches = Vec::new();
     for (left, right) in opensbi.steps.iter().zip(rustsbi.steps.iter()) {
@@ -997,11 +1012,18 @@ fn diff_sequence_reports(
                 continue;
             }
             compared_steps += 1;
+            let ignore_value_diff =
+                left.value != right.value && should_ignore_sequence_value_diff(&policy, left, right);
             let same = left.sbi_error == right.sbi_error
                 && left.value == right.value
                 && left.extension_found == right.extension_found
                 && left.fdt_status == right.fdt_status
                 && left.fdt_hart_count == right.fdt_hart_count;
+            let same = same || (ignore_value_diff
+                && left.sbi_error == right.sbi_error
+                && left.extension_found == right.extension_found
+                && left.fdt_status == right.fdt_status
+                && left.fdt_hart_count == right.fdt_hart_count);
             if !same {
                 mismatches.push(SequenceMismatch {
                     index: left.index,
@@ -1041,6 +1063,24 @@ fn diff_sequence_reports(
         opensbi,
         rustsbi,
     }
+}
+
+fn should_ignore_sequence_value_diff(
+    policy: &DiffPolicy,
+    left: &SequenceStepReport,
+    right: &SequenceStepReport,
+) -> bool {
+    if left.eid != right.eid || left.fid != right.fid {
+        return false;
+    }
+    let Some(eid) = left.eid else {
+        return false;
+    };
+    let fid = left.fid.unwrap_or(0);
+    if policy.error_code_only_eids.contains(&eid) {
+        return true;
+    }
+    policy.ignore_impl_defined_value && matches!((eid, fid), (0x504d55, _))
 }
 
 fn write_sequence_seed(output: &PathBuf, program: &SequenceProgram) -> Result<(), String> {
@@ -1417,6 +1457,8 @@ mod tests {
             index: 0,
             kind: "call".to_string(),
             label: "base-get-spec-version".to_string(),
+            eid: Some(0x10),
+            fid: Some(0),
             classification: "ok".to_string(),
             signature: "sig".to_string(),
             expectation_ok: true,
@@ -1456,6 +1498,63 @@ mod tests {
             memory_signature: "mem".to_string(),
             semantic_signature: "semantic".to_string(),
             steps: vec![step],
+        };
+        let diff = diff_sequence_reports("seq".to_string(), "shared".to_string(), opensbi, rustsbi);
+        assert_eq!(diff.classification, "match");
+    }
+
+    #[test]
+    fn diff_report_ignores_base_value_only_mismatch() {
+        let opensbi_step = SequenceStepReport {
+            index: 0,
+            kind: "call".to_string(),
+            label: "base-get-spec-version".to_string(),
+            eid: Some(0x10),
+            fid: Some(0),
+            classification: "ok".to_string(),
+            signature: "opensbi".to_string(),
+            expectation_ok: true,
+            interesting: false,
+            supported_by_target: Some(true),
+            sbi_error: Some(0),
+            value: Some(0x0300_0000),
+            extension_found: Some(true),
+            fdt_status: None,
+            fdt_hart_count: None,
+            state_signature: "state".to_string(),
+        };
+        let rustsbi_step = SequenceStepReport {
+            value: Some(0x0200_0000),
+            signature: "rustsbi".to_string(),
+            ..opensbi_step.clone()
+        };
+        let opensbi = SequenceRunReport {
+            impl_kind: HostTargetKind::OpenSbi,
+            input: "seq".to_string(),
+            name: "shared".to_string(),
+            classification: "ok".to_string(),
+            signature: "sig".to_string(),
+            interesting: false,
+            supported_by_target: true,
+            step_count: 1,
+            state_signature: "state".to_string(),
+            memory_signature: "mem".to_string(),
+            semantic_signature: "semantic".to_string(),
+            steps: vec![opensbi_step],
+        };
+        let rustsbi = SequenceRunReport {
+            impl_kind: HostTargetKind::RustSbi,
+            input: "seq".to_string(),
+            name: "shared".to_string(),
+            classification: "ok".to_string(),
+            signature: "sig".to_string(),
+            interesting: false,
+            supported_by_target: true,
+            step_count: 1,
+            state_signature: "state".to_string(),
+            memory_signature: "mem".to_string(),
+            semantic_signature: "semantic".to_string(),
+            steps: vec![rustsbi_step],
         };
         let diff = diff_sequence_reports("seq".to_string(), "shared".to_string(), opensbi, rustsbi);
         assert_eq!(diff.classification, "match");
