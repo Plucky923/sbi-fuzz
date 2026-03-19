@@ -1222,7 +1222,14 @@ fn semantic_sequence_args_from_input(
                     SequenceArg::MemoryAddr { object }
                 }
             }
-            ArgumentKind::HartMaskAddress => SequenceArg::Const { value },
+            ArgumentKind::HartMaskAddress => {
+                if value == 0 {
+                    SequenceArg::Const { value }
+                } else {
+                    let object = ensure_semantic_memory(memory, index, kind, value);
+                    SequenceArg::MemoryAddr { object }
+                }
+            }
             ArgumentKind::AddressLow => {
                 if value == 0 {
                     pending_split_object = None;

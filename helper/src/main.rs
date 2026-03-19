@@ -1118,7 +1118,9 @@ fn host_input_to_sequence_program(input: &HostHarnessInput) -> Result<SequencePr
                 ArgumentKind::Address => object
                     .map(|object| SequenceArg::MemoryAddr { object })
                     .unwrap_or(SequenceArg::Const { value }),
-                ArgumentKind::HartMaskAddress => SequenceArg::Const { value },
+                ArgumentKind::HartMaskAddress => object
+                    .map(|object| SequenceArg::MemoryAddr { object })
+                    .unwrap_or(SequenceArg::Const { value }),
                 ArgumentKind::AddressLow => object
                     .map(|object| SequenceArg::MemoryAddrLow { object })
                     .unwrap_or(SequenceArg::Const { value }),
@@ -1157,12 +1159,13 @@ fn host_input_to_sequence_program(input: &HostHarnessInput) -> Result<SequencePr
             privilege: input.privilege,
         });
     }
+    let default_label = if input.label.trim().is_empty() {
+        format!("host-{:x}-{:x}", input.call.extid, input.call.fid)
+    } else {
+        input.label.clone()
+    };
     steps.push(SequenceStep::Call {
-        label: if input.label.trim().is_empty() {
-            format!("host-{:x}-{:x}", input.call.extid, input.call.fid)
-        } else {
-            input.label.clone()
-        },
+        label: default_label.clone(),
         eid: input.call.extid,
         fid: input.call.fid,
         args,
@@ -1171,7 +1174,7 @@ fn host_input_to_sequence_program(input: &HostHarnessInput) -> Result<SequencePr
 
     let program = SequenceProgram {
         metadata: SequenceMetadata {
-            name: input.label.clone(),
+            name: default_label,
             source: format!("host-crash:{}", input.hash_string()),
             note: String::new(),
         },
@@ -1185,6 +1188,45 @@ fn host_input_to_sequence_program(input: &HostHarnessInput) -> Result<SequencePr
     };
     common::validate_sequence_program(&program)?;
     Ok(program)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn host_input_to_sequence_program_maps_hart_mask_address_to_memory() {
+        let input = HostHarnessInput {
+            target_kind: HostTargetKind::RustSbi,
+            mode: HostHarnessMode::Ecall,
+            call: HostCall::new(0x7350_49, 0, [0x8000_3000, 0, 0, 0, 0, 0]),
+            hart_id: 0,
+            hart_state: HostHartState::Started,
+            privilege: HostPrivilegeState::Supervisor,
+            memory_regions: vec![HostMemoryRegion {
+                guest_addr: 0x8000_3000,
+                read: true,
+                write: false,
+                execute: false,
+                bytes: vec![0x1],
+            }],
+            platform_fault: HostPlatformFaultProfile::none(),
+            fdt_blob: Vec::new(),
+            label: String::new(),
+        };
+
+        let program = host_input_to_sequence_program(&input).expect("convert host input");
+        assert_eq!(program.metadata.name, "host-735049-0");
+        assert_eq!(program.env.platform, "host-converted");
+
+        match &program.steps[0] {
+            SequenceStep::Call { args, label, .. } => {
+                assert_eq!(label, "host-735049-0");
+                assert!(matches!(args[0], SequenceArg::MemoryAddr { .. }));
+            }
+            other => panic!("unexpected step: {other:?}"),
+        }
+    }
 }
 
 fn host_opensbi_ecall_seeds() -> Vec<(String, HostHarnessInput)> {
