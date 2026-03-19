@@ -40,11 +40,17 @@ test-triage-host-fuzz-results:
 test-minimize-spec-violation:
 	@./scripts/test-minimize-spec-violation.sh
 
+test-default-cross-layer-dedup:
+	@./scripts/test-default-cross-layer-dedup.sh
+
+test-default-collect-metrics:
+	@./scripts/test-default-collect-metrics.sh
+
 triage-host-fuzz:
 	@python3 ./scripts/triage-host-fuzz-results.py ./output/host_fuzz/fuzz_ecall_rustsbi --json-out ./output/host_fuzz/triage.json --md-out ./output/host_fuzz/triage.md
 
 collect-metrics:
-	@python3 ./scripts/collect-metrics.py --log-dir ./output/host_fuzz/logs --json-out ./output/host_fuzz/metrics.json
+	@python3 ./scripts/collect-metrics.py --log-dir ./output/host_fuzz/logs --triage-json ./output/host_fuzz/triage.json --cross-layer-json ./output/host_fuzz/cross-layer.json --json-out ./output/host_fuzz/metrics.json
 
 quality-gate:
 	@python3 ./scripts/campaign-quality-gate.py --metrics ./output/host_fuzz/metrics.json --triage ./output/host_fuzz/triage.json --json-out ./output/host_fuzz/quality-gate.json
@@ -52,7 +58,7 @@ quality-gate:
 campaign-quality-gate: quality-gate
 
 cross-layer-dedup:
-	@python3 ./scripts/cross-layer-dedup.py ./output/host_fuzz/triage.json --json-out ./output/host_fuzz/cross-layer.json
+	@./scripts/run-default-cross-layer-dedup.sh
 
 host-fuzz-corpus:
 	@./scripts/prepare-host-fuzz-corpus.sh
@@ -196,6 +202,8 @@ help:
 	@echo "  test-collect-metrics   - Validate combined log, triage, and cross-layer metric summaries"
 	@echo "  test-triage-host-fuzz-results - Validate host fuzz triage bucketing and markdown output"
 	@echo "  test-minimize-spec-violation - Validate sequence spec-violation minimization"
+	@echo "  test-default-cross-layer-dedup - Validate the default make target aggregates host/sequence/qemu inputs"
+	@echo "  test-default-collect-metrics - Validate the default make target includes companion triage/cross-layer files"
 	@echo "  triage-host-fuzz       - Triage host_harness fuzz artifacts into JSON/Markdown"
 	@echo "  collect-metrics        - Summarize libFuzzer metrics from host-side logs"
 	@echo "  quality-gate           - Evaluate host-side metrics and triage against quality thresholds"
@@ -240,4 +248,4 @@ help:
 	@echo "  clean-generated        - Clean generated local samples and reports"
 	@echo "  help                   - Display this help message"
 
-.PHONY: all compile check-env check-env-smoke test-common test-host-harness test-regression test-campaign-quality-gate test-cross-layer-dedup test-collect-metrics test-triage-host-fuzz-results test-minimize-spec-violation test-linux-corpus-import test-opensbi-triage test-opensbi-replay test-opensbi-replay-summary test-opensbi-sanitizer-demo test-opensbi-coverage test-opensbi-bug-report test-rustsbi-scenarios test-rustsbi-replay test-rustsbi-helper-timeout test-rustsbi-collect-coverage-timeout test-rustsbi-hang-stability test-rustsbi-hang-minimize test-sbi-hang-semantic-buckets test-rustsbi-fuzz-finds-bug test-sequence-replay triage-host-fuzz collect-metrics quality-gate campaign-quality-gate cross-layer-dedup host-fuzz-corpus host-fuzz-smoke host-fuzz-rustsbi host-fuzz-sequence host-fuzz-diff host-fuzz-60 host-fuzz-60-complex sequence-seeds campaign-sequence-opensbi campaign-sequence-rustsbi campaign-opensbi campaign-rustsbi campaign-rustsbi-complex fuzzer helper injector clean clean-cargo clean-injector clean-playgrounds clean-generated help
+.PHONY: all compile check-env check-env-smoke test-common test-host-harness test-regression test-campaign-quality-gate test-cross-layer-dedup test-collect-metrics test-triage-host-fuzz-results test-minimize-spec-violation test-default-cross-layer-dedup test-default-collect-metrics test-linux-corpus-import test-opensbi-triage test-opensbi-replay test-opensbi-replay-summary test-opensbi-sanitizer-demo test-opensbi-coverage test-opensbi-bug-report test-rustsbi-scenarios test-rustsbi-replay test-rustsbi-helper-timeout test-rustsbi-collect-coverage-timeout test-rustsbi-hang-stability test-rustsbi-hang-minimize test-sbi-hang-semantic-buckets test-rustsbi-fuzz-finds-bug test-sequence-replay triage-host-fuzz collect-metrics quality-gate campaign-quality-gate cross-layer-dedup host-fuzz-corpus host-fuzz-smoke host-fuzz-rustsbi host-fuzz-sequence host-fuzz-diff host-fuzz-60 host-fuzz-60-complex sequence-seeds campaign-sequence-opensbi campaign-sequence-rustsbi campaign-opensbi campaign-rustsbi campaign-rustsbi-complex fuzzer helper injector clean clean-cargo clean-injector clean-playgrounds clean-generated help
