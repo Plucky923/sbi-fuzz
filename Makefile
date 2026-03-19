@@ -31,6 +31,9 @@ test-campaign-quality-gate:
 test-cross-layer-dedup:
 	@./scripts/test-cross-layer-dedup.sh
 
+test-collect-metrics:
+	@./scripts/test-collect-metrics.sh
+
 triage-host-fuzz:
 	@python3 ./scripts/triage-host-fuzz-results.py ./output/host_fuzz/fuzz_ecall_rustsbi --json-out ./output/host_fuzz/triage.json --md-out ./output/host_fuzz/triage.md
 
@@ -184,6 +187,7 @@ help:
 	@echo "  test-regression        - Run deterministic host-side regression checks"
 	@echo "  test-campaign-quality-gate - Validate host-side campaign quality thresholds"
 	@echo "  test-cross-layer-dedup - Validate cross-layer dedup keeps per-source minimal reproducers"
+	@echo "  test-collect-metrics   - Validate combined log, triage, and cross-layer metric summaries"
 	@echo "  triage-host-fuzz       - Triage host_harness fuzz artifacts into JSON/Markdown"
 	@echo "  collect-metrics        - Summarize libFuzzer metrics from host-side logs"
 	@echo "  quality-gate           - Evaluate host-side metrics and triage against quality thresholds"
@@ -228,4 +232,4 @@ help:
 	@echo "  clean-generated        - Clean generated local samples and reports"
 	@echo "  help                   - Display this help message"
 
-.PHONY: all compile check-env check-env-smoke test-common test-host-harness test-regression test-campaign-quality-gate test-cross-layer-dedup test-linux-corpus-import test-opensbi-triage test-opensbi-replay test-opensbi-replay-summary test-opensbi-sanitizer-demo test-opensbi-coverage test-opensbi-bug-report test-rustsbi-scenarios test-rustsbi-replay test-rustsbi-helper-timeout test-rustsbi-collect-coverage-timeout test-rustsbi-hang-stability test-rustsbi-hang-minimize test-sbi-hang-semantic-buckets test-rustsbi-fuzz-finds-bug test-sequence-replay triage-host-fuzz collect-metrics quality-gate campaign-quality-gate cross-layer-dedup host-fuzz-corpus host-fuzz-smoke host-fuzz-rustsbi host-fuzz-sequence host-fuzz-diff host-fuzz-60 host-fuzz-60-complex sequence-seeds campaign-sequence-opensbi campaign-sequence-rustsbi campaign-opensbi campaign-rustsbi campaign-rustsbi-complex fuzzer helper injector clean clean-cargo clean-injector clean-playgrounds clean-generated help
+.PHONY: all compile check-env check-env-smoke test-common test-host-harness test-regression test-campaign-quality-gate test-cross-layer-dedup test-collect-metrics test-linux-corpus-import test-opensbi-triage test-opensbi-replay test-opensbi-replay-summary test-opensbi-sanitizer-demo test-opensbi-coverage test-opensbi-bug-report test-rustsbi-scenarios test-rustsbi-replay test-rustsbi-helper-timeout test-rustsbi-collect-coverage-timeout test-rustsbi-hang-stability test-rustsbi-hang-minimize test-sbi-hang-semantic-buckets test-rustsbi-fuzz-finds-bug test-sequence-replay triage-host-fuzz collect-metrics quality-gate campaign-quality-gate cross-layer-dedup host-fuzz-corpus host-fuzz-smoke host-fuzz-rustsbi host-fuzz-sequence host-fuzz-diff host-fuzz-60 host-fuzz-60-complex sequence-seeds campaign-sequence-opensbi campaign-sequence-rustsbi campaign-opensbi campaign-rustsbi campaign-rustsbi-complex fuzzer helper injector clean clean-cargo clean-injector clean-playgrounds clean-generated help
