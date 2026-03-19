@@ -61,6 +61,18 @@ impl HsmStateTracker {
         self.hart_states.get(hart_id as usize).copied()
     }
 
+    pub fn active_hart(&self) -> u64 {
+        self.active_hart
+    }
+
+    pub fn select_hart(&mut self, hart_id: u64) {
+        self.active_hart = hart_id;
+    }
+
+    pub fn set_hart_state(&mut self, hart_id: u64, state: HostHartState) {
+        self.apply_explicit_state(hart_id, state);
+    }
+
     pub fn update(&mut self, step: &SequenceStep, report: &HostHarnessReport) {
         if let SequenceStep::SetTargetHart { hart_id } = step {
             self.active_hart = *hart_id;

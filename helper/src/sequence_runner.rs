@@ -1,8 +1,8 @@
 use common::{
     HostCall, HostHarnessInput, HostHarnessMode, HostHartState, HostMemoryRegion,
     HostPlatformFaultProfile, HostPrivilegeState, HostTargetKind,
-    MemoryOracle, SequenceArg, SequenceFdtExpectation, SequenceMemoryObject, SequenceProgram,
-    SequenceStep, check_host_report, generate_seed_variants,
+    HsmOp, HsmStateTracker, MemoryOracle, SequenceArg, SequenceFdtExpectation,
+    SequenceMemoryObject, SequenceProgram, SequenceStep, check_host_report, generate_seed_variants,
     sequence_memory_guest_addr, sequence_program_describe, sequence_program_from_bytes,
     sequence_program_from_exec, sequence_program_from_semantic_input,
     sequence_program_from_toml_input, sequence_program_semantic_signature, sequence_program_to_bytes,
@@ -503,15 +503,18 @@ fn detect_sequence_violation(
     impl_kind: HostTargetKind,
 ) -> Result<Option<SequenceViolationSummary>, String> {
     let mut state = SequenceExecutionState::new(program);
+    let mut hsm_tracker = HsmStateTracker::new(program.env.smp);
     let memory_map = memory_map(program);
 
     for (index, step) in program.steps.iter().enumerate() {
         match step {
             SequenceStep::SetTargetHart { hart_id } => {
                 state.active_hart = *hart_id;
+                hsm_tracker.select_hart(*hart_id);
             }
             SequenceStep::SetHartState { hart_id, state: hart_state } => {
                 state.hart_states.insert(*hart_id, *hart_state);
+                hsm_tracker.set_hart_state(*hart_id, *hart_state);
             }
             SequenceStep::SetPrivilege { privilege } => {
                 state.privilege = *privilege;
@@ -578,9 +581,19 @@ fn detect_sequence_violation(
                         detail: format!("{violation:?}"),
                     }));
                 }
+                if let Some(violation) = hsm_model_violation(&hsm_tracker, step, &report) {
+                    return Ok(Some(SequenceViolationSummary {
+                        kind: "model".to_string(),
+                        signature: format!("model:{violation}"),
+                        step_index: index,
+                        step_kind: "call".to_string(),
+                        detail: violation,
+                    }));
+                }
                 if !report.post_memory_regions.is_empty() {
                     state.memory_regions = report.post_memory_regions.clone();
                 }
+                hsm_tracker.update(step, &report);
                 update_call_state(&mut state, *eid, *fid, &values, &report);
             }
             SequenceStep::ParseFdt { label, object, .. } => {
@@ -619,6 +632,50 @@ fn detect_sequence_violation(
     }
 
     Ok(None)
+}
+
+fn hsm_model_violation(
+    tracker: &HsmStateTracker,
+    step: &SequenceStep,
+    report: &HostHarnessReport,
+) -> Option<String> {
+    let HostHarnessResult::Ecall(ecall) = &report.result else {
+        return None;
+    };
+    let SequenceStep::Call { eid, fid, args, .. } = step else {
+        return None;
+    };
+    if *eid != 0x4853_4d {
+        return None;
+    }
+
+    let target_hart = match *fid {
+        0 | 2 => constant_arg(args.first())?,
+        1 | 3 => tracker.active_hart(),
+        _ => return None,
+    };
+    let op = match *fid {
+        0 => HsmOp::HartStart,
+        1 => HsmOp::HartStop,
+        2 => HsmOp::HartGetStatus,
+        3 => HsmOp::HartSuspend,
+        _ => return None,
+    };
+    let expected = tracker.expected_outcomes(op, target_hart);
+    if expected.contains(&ecall.sbi_error) {
+        return None;
+    }
+    Some(format!(
+        "unexpected hsm outcome eid=0x{:x} fid=0x{:x} target_hart={} got={} expected={expected:?}",
+        eid, fid, target_hart, ecall.sbi_error
+    ))
+}
+
+fn constant_arg(arg: Option<&SequenceArg>) -> Option<u64> {
+    match arg {
+        Some(SequenceArg::Const { value }) => Some(*value),
+        _ => None,
+    }
 }
 
 fn materialize_arg(
@@ -1335,8 +1392,8 @@ fn impl_name(kind: HostTargetKind) -> &'static str {
 mod tests {
     use super::*;
     use common::{
-        HostCall, HostHarnessMode, HostHartState, HostMemoryRegion, HostPlatformFaultMode,
-        HostPlatformFaultProfile, HostPrivilegeState, SequenceArg, SequenceEnv,
+        HostCall, HostEcallReport, HostHarnessMode, HostHartState, HostMemoryRegion,
+        HostPlatformFaultMode, HostPlatformFaultProfile, HostPrivilegeState, SequenceArg, SequenceEnv,
         SequenceMemoryObject, SequenceMetadata, SequenceProgram, SequenceStep,
     };
 
@@ -1494,5 +1551,75 @@ mod tests {
         } else {
             panic!("expected ecall report");
         }
+    }
+
+    #[test]
+    fn hsm_model_violation_uses_active_hart_for_self_directed_ops() {
+        let mut tracker = HsmStateTracker::new(2);
+        tracker.select_hart(1);
+        tracker.set_hart_state(1, HostHartState::Started);
+        let step = SequenceStep::Call {
+            label: "stop".to_string(),
+            eid: 0x4853_4d,
+            fid: 1,
+            args: vec![SequenceArg::Const { value: 0 }; 6],
+            expect: None,
+        };
+        let report = HostHarnessReport {
+            target_kind: HostTargetKind::OpenSbi,
+            backend: "test".to_string(),
+            mode: HostHarnessMode::Ecall,
+            classification: "ok".to_string(),
+            signature: "ok".to_string(),
+            post_memory_regions: Vec::new(),
+            result: HostHarnessResult::Ecall(HostEcallReport {
+                extid: 0x4853_4d,
+                fid: 1,
+                sbi_error: 0,
+                sbi_error_name: Some("success".to_string()),
+                value: 0,
+                next_mepc: None,
+                extension_found: true,
+                side_effects: 0,
+                console_bytes: 0,
+                timer_value: 0,
+            }),
+        };
+        assert!(hsm_model_violation(&tracker, &step, &report).is_none());
+    }
+
+    #[test]
+    fn hsm_model_violation_reports_unexpected_success() {
+        let mut tracker = HsmStateTracker::new(2);
+        tracker.select_hart(1);
+        let step = SequenceStep::Call {
+            label: "suspend".to_string(),
+            eid: 0x4853_4d,
+            fid: 3,
+            args: vec![SequenceArg::Const { value: 0 }; 6],
+            expect: None,
+        };
+        let report = HostHarnessReport {
+            target_kind: HostTargetKind::OpenSbi,
+            backend: "test".to_string(),
+            mode: HostHarnessMode::Ecall,
+            classification: "ok".to_string(),
+            signature: "ok".to_string(),
+            post_memory_regions: Vec::new(),
+            result: HostHarnessResult::Ecall(HostEcallReport {
+                extid: 0x4853_4d,
+                fid: 3,
+                sbi_error: 0,
+                sbi_error_name: Some("success".to_string()),
+                value: 0,
+                next_mepc: None,
+                extension_found: true,
+                side_effects: 0,
+                console_bytes: 0,
+                timer_value: 0,
+            }),
+        };
+        let violation = hsm_model_violation(&tracker, &step, &report).expect("model violation");
+        assert!(violation.contains("target_hart=1"));
     }
 }
