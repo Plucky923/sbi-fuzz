@@ -180,6 +180,24 @@ fn hsm_stop_on_stopped_hart_is_illegal_transition() {
 }
 
 #[test]
+fn hsm_suspend_invalid_type_is_rejected_even_from_started_state() {
+    let mut input = sample_input(0x4853_4d, 3, [0x2, 0, 0, 0, 0, 0]);
+    input.hart_state = HostHartState::Started;
+    let report = sample_report(0x4853_4d, 3, SbiError::Success.code(), 0);
+    let violations = check_ecall_result(&input, &report);
+    assert!(matches!(
+        violations.as_slice(),
+        [SpecViolation::WrongErrorCode {
+            expected,
+            got,
+            context
+        }] if *expected == SbiError::InvalidParam.code()
+            && *got == SbiError::Success.code()
+            && context.contains("hart_suspend")
+    ));
+}
+
+#[test]
 fn active_platform_fault_profile_skips_spec_checks() {
     let mut input = sample_input(0x4442_434e, 0, [4, 0x8000_1000, 0, 0, 0, 0]);
     input.mode = HostHarnessMode::PlatformFault;
@@ -200,11 +218,14 @@ fn active_platform_fault_profile_skips_spec_checks() {
 }
 
 #[test]
-fn ipi_nonzero_mask_is_not_enforced_in_host_model() {
+fn ipi_invalid_hart_mask_member_is_rejected() {
     let input = sample_input(0x7350_49, 0, [0b0001_0000, 60, 0, 0, 0, 0]);
     let report = sample_report(0x7350_49, 0, SbiError::Success.code(), 0);
     let violations = check_ecall_result(&input, &report);
-    assert!(violations.is_empty());
+    assert!(matches!(
+        violations.as_slice(),
+        [SpecViolation::HartMaskInvalidNotRejected { hart_id: 64 }]
+    ));
 }
 
 #[test]
@@ -216,11 +237,14 @@ fn ipi_empty_mask_is_accepted() {
 }
 
 #[test]
-fn rfence_nonzero_mask_is_not_enforced_in_host_model() {
+fn rfence_invalid_hart_mask_member_is_rejected() {
     let input = sample_input(0x5246_4e43, 1, [1, 64, 0x8000_1000, 0x1000, 0, 0]);
     let report = sample_report(0x5246_4e43, 1, SbiError::Success.code(), 0);
     let violations = check_ecall_result(&input, &report);
-    assert!(violations.is_empty());
+    assert!(matches!(
+        violations.as_slice(),
+        [SpecViolation::HartMaskInvalidNotRejected { hart_id: 64 }]
+    ));
 }
 
 #[test]
