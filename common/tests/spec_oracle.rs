@@ -168,6 +168,23 @@ fn hsm_start_on_started_hart_requires_already_available() {
 }
 
 #[test]
+fn hsm_start_invalid_hart_is_rejected() {
+    let input = sample_input(0x4853_4d, 0, [64, 0, 0, 0, 0, 0]);
+    let report = sample_report(0x4853_4d, 0, SbiError::Success.code(), 0);
+    let violations = check_ecall_result(&input, &report);
+    assert!(matches!(
+        violations.as_slice(),
+        [SpecViolation::WrongErrorCode {
+            expected,
+            got,
+            context
+        }, ..] if *expected == SbiError::InvalidParam.code()
+            && *got == SbiError::Success.code()
+            && context.contains("hart_start")
+    ));
+}
+
+#[test]
 fn hsm_stop_on_stopped_hart_is_illegal_transition() {
     let mut input = sample_input(0x4853_4d, 1, [0; 6]);
     input.hart_state = HostHartState::Stopped;
@@ -305,5 +322,22 @@ fn pmu_snapshot_invalid_address_is_rejected() {
     assert!(matches!(
         violations.as_slice(),
         [SpecViolation::InvalidAddressNotRejected { .. }]
+    ));
+}
+
+#[test]
+fn pmu_snapshot_invalid_address_requires_invalid_param_error() {
+    let input = sample_input(0x504d_55, 7, [0x8000_3000, 0, 0, 0, 0, 0]);
+    let report = sample_report(0x504d_55, 7, SbiError::Failed.code(), 0);
+    let violations = check_ecall_result(&input, &report);
+    assert!(matches!(
+        violations.as_slice(),
+        [SpecViolation::WrongErrorCode {
+            expected,
+            got,
+            context
+        }] if *expected == SbiError::InvalidParam.code()
+            && *got == SbiError::Failed.code()
+            && context.contains("snapshot_set_shmem")
     ));
 }

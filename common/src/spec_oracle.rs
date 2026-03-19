@@ -176,6 +176,19 @@ fn check_hsm_rules(
     report: &HostEcallReport,
     violations: &mut Vec<SpecViolation>,
 ) {
+    if input.call.fid == 0 && input.call.args[0] >= MAX_TRACKED_HARTS {
+        if report.sbi_error != SbiError::InvalidParam.code() {
+            violations.push(SpecViolation::WrongErrorCode {
+                expected: SbiError::InvalidParam.code(),
+                got: report.sbi_error,
+                context: format!(
+                    "hart_start should reject invalid hart {}",
+                    input.call.args[0]
+                ),
+            });
+        }
+    }
+
     if input.call.fid == 3 {
         let suspend_type = input.call.args[0];
         let suspend_type_invalid = suspend_type & !0x8000_0000 != 0;
@@ -301,16 +314,25 @@ fn check_pmu_rules(
         7 => {
             let addr = join_split_address(input.call.args[0], input.call.args[1]);
             let len = 8;
-            if addr != 0
-                && !region_covers(&input.memory_regions, addr, len, true, false)
-                && report.sbi_error == SbiError::Success.code()
-            {
-                violations.push(SpecViolation::InvalidAddressNotRejected {
-                    eid: input.call.extid,
-                    fid: input.call.fid,
-                    addr,
-                    len,
-                });
+            let invalid_addr = addr != 0 && !region_covers(&input.memory_regions, addr, len, true, false);
+            if invalid_addr {
+                if report.sbi_error == SbiError::Success.code() {
+                    violations.push(SpecViolation::InvalidAddressNotRejected {
+                        eid: input.call.extid,
+                        fid: input.call.fid,
+                        addr,
+                        len,
+                    });
+                } else if report.sbi_error != SbiError::InvalidParam.code() {
+                    violations.push(SpecViolation::WrongErrorCode {
+                        expected: SbiError::InvalidParam.code(),
+                        got: report.sbi_error,
+                        context: format!(
+                            "pmu snapshot_set_shmem should reject invalid address 0x{:x}",
+                            addr
+                        ),
+                    });
+                }
             }
         }
         _ => {}
