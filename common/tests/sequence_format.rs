@@ -1,7 +1,7 @@
 use common::{
-    HostHartState, HostPlatformFaultMode, HostPlatformFaultProfile, HostPrivilegeState,
-    HostTargetKind, SEQUENCE_MAGIC, SequenceArg, SequenceCallExpectation, SequenceEnv,
-    SequenceMemoryObject, SequenceMetadata, SequenceProgram, SequenceStep,
+    Args, CallSchema, HostHartState, HostPlatformFaultMode, HostPlatformFaultProfile,
+    HostPrivilegeState, HostTargetKind, InputData, Metadata, SEQUENCE_MAGIC, SequenceArg,
+    SequenceCallExpectation, SequenceEnv, SequenceMemoryObject, SequenceMetadata, SequenceProgram, SequenceStep,
     sequence_program_describe, sequence_program_from_bytes, sequence_program_from_exec,
     sequence_program_from_fuzz_bytes, sequence_program_from_semantic_input,
     sequence_program_primary_input,
@@ -247,6 +247,52 @@ fn semantic_sequence_builder_keeps_hsm_hart_id_and_address_roles() {
         SequenceStep::Call { args, .. } => {
             assert!(matches!(args[0], SequenceArg::Const { value: 0 }));
             assert!(matches!(args[1], SequenceArg::MemoryAddr { .. }));
+        }
+        other => panic!("unexpected step: {other:?}"),
+    }
+}
+
+#[test]
+fn semantic_sequence_builder_maps_hart_mask_address_to_memory_object() {
+    let input = InputData {
+        metadata: Metadata {
+            extension_name: "ipi".to_string(),
+            source: "generated".to_string(),
+            schema: Some(CallSchema::new(
+                common::ArgumentKind::HartMaskAddress,
+                common::ArgumentKind::HartId,
+                common::ArgumentKind::Value,
+                common::ArgumentKind::Value,
+                common::ArgumentKind::Value,
+                common::ArgumentKind::Value,
+            )),
+        },
+        args: Args {
+            eid: 0x7350_49,
+            fid: 0,
+            arg0: 0x8000_3000,
+            arg1: 0,
+            arg2: 0,
+            arg3: 0,
+            arg4: 0,
+            arg5: 0,
+        },
+    };
+
+    let program = sequence_program_from_semantic_input(
+        &input,
+        "ipi-semantic".to_string(),
+        "generated".to_string(),
+        SequenceEnv {
+            smp: 4,
+            impl_hint: Some(HostTargetKind::RustSbi),
+            platform: String::new(),
+        },
+    );
+    assert_eq!(program.memory.len(), 1);
+    match &program.steps[0] {
+        SequenceStep::Call { args, .. } => {
+            assert!(matches!(args[0], SequenceArg::MemoryAddr { .. }));
         }
         other => panic!("unexpected step: {other:?}"),
     }
