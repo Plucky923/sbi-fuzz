@@ -22,7 +22,11 @@ done < <(find "$ROOT_DIR/output/sequence" -type f -name 'triage.json' 2>/dev/nul
 
 while IFS= read -r path; do
     args+=(--source "qemu=${path}")
-done < <(find "$ROOT_DIR/output/bugs" -maxdepth 1 -type f -name '*.json' 2>/dev/null | sort)
+done < <(find "$ROOT_DIR/output/bugs" -maxdepth 1 -type f -name '*.bugs.json' 2>/dev/null | sort)
+
+while IFS= read -r path; do
+    args+=(--source "qemu=${path}")
+done < <(find "$ROOT_DIR/playground" -path '*/output/bugs/*.bugs.json' -type f 2>/dev/null | sort)
 
 if [[ ${#args[@]} -eq 0 ]]; then
     echo "no cross-layer inputs found under standard output locations" >&2
