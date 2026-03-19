@@ -23,6 +23,28 @@ def normalize_bucket(source: str, item: dict) -> tuple[str, dict]:
     }
 
 
+def choose_best_reproducer(paths: list[str]) -> str | None:
+    candidates = [path for path in paths if path]
+    if not candidates:
+        return None
+    return min(candidates, key=lambda path: (len(path), path))
+
+
+def summarize_source_reproducers(items: list[dict]) -> dict[str, str]:
+    grouped: dict[str, list[str]] = defaultdict(list)
+    for item in items:
+        if item.get("reproducer"):
+            grouped[item["source"]].append(item["reproducer"])
+    return {
+        source: best
+        for source, best in (
+            (source, choose_best_reproducer(paths))
+            for source, paths in sorted(grouped.items())
+        )
+        if best
+    }
+
+
 def extract_items(source: str, data: dict) -> list[dict]:
     if isinstance(data.get("buckets"), dict):
         return [normalize_bucket(source, bucket)[1] | {"signature": normalize_bucket(source, bucket)[0]} for bucket in data["buckets"].values()]
@@ -54,7 +76,8 @@ def main() -> int:
                 "fid": items[0]["fid"],
                 "violation": items[0]["violation"],
                 "detail": items[0]["detail"],
-                "reproducers": [item["reproducer"] for item in items if item.get("reproducer")],
+                "reproducers": sorted({item["reproducer"] for item in items if item.get("reproducer")}),
+                "source_reproducers": summarize_source_reproducers(items),
             }
             for signature, items in sorted(grouped.items())
         },
