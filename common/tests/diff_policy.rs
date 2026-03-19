@@ -86,3 +86,39 @@ fn diff_policy_uses_spec_violation_severity_when_one_side_is_wrong() {
     let diffs = diff_host_reports(&input, &opensbi, &rustsbi, &DiffPolicy::default());
     assert!(diffs.iter().any(|diff| diff.severity == DiffSeverity::SpecViolation));
 }
+
+#[test]
+fn diff_policy_does_not_hide_known_extension_not_supported_divergence() {
+    let input = sample_input(0x4442_434e, 0);
+    let opensbi = sample_report(HostTargetKind::OpenSbi, 0x4442_434e, 0, 0, 4);
+    let rustsbi = sample_report(
+        HostTargetKind::RustSbi,
+        0x4442_434e,
+        0,
+        SbiError::NotSupported.code(),
+        0,
+    );
+    let diffs = diff_host_reports(&input, &opensbi, &rustsbi, &DiffPolicy::default());
+    assert!(diffs.iter().any(|diff| diff.field == "sbi_error"));
+}
+
+#[test]
+fn diff_policy_still_ignores_unknown_extension_not_supported_noise() {
+    let input = sample_input(0xdead_beef, 0);
+    let opensbi = sample_report(
+        HostTargetKind::OpenSbi,
+        0xdead_beef,
+        0,
+        SbiError::NotSupported.code(),
+        0,
+    );
+    let rustsbi = sample_report(
+        HostTargetKind::RustSbi,
+        0xdead_beef,
+        0,
+        SbiError::NotSupported.code(),
+        0,
+    );
+    let diffs = diff_host_reports(&input, &opensbi, &rustsbi, &DiffPolicy::default());
+    assert!(diffs.is_empty());
+}
