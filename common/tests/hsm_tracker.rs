@@ -82,3 +82,55 @@ fn pending_states_report_invalid_follow_up_operations() {
         vec![SbiError::InvalidState.code()]
     );
 }
+
+#[test]
+fn set_target_hart_redirects_successful_stop_updates() {
+    let mut tracker = HsmStateTracker::with_states(vec![
+        HsmHartState::Started,
+        HsmHartState::Started,
+    ]);
+    tracker.update(&SequenceStep::SetTargetHart { hart_id: 1 }, &success_report());
+    let step = SequenceStep::Call {
+        label: "stop".to_string(),
+        eid: 0x4853_4d,
+        fid: 1,
+        args: vec![
+            SequenceArg::Const { value: 0 },
+            SequenceArg::Const { value: 0 },
+            SequenceArg::Const { value: 0 },
+            SequenceArg::Const { value: 0 },
+            SequenceArg::Const { value: 0 },
+            SequenceArg::Const { value: 0 },
+        ],
+        expect: None,
+    };
+    tracker.update(&step, &success_report());
+    assert_eq!(tracker.hart_state(0), Some(HsmHartState::Started));
+    assert_eq!(tracker.hart_state(1), Some(HsmHartState::Stopped));
+}
+
+#[test]
+fn set_target_hart_redirects_successful_suspend_updates() {
+    let mut tracker = HsmStateTracker::with_states(vec![
+        HsmHartState::Started,
+        HsmHartState::Started,
+    ]);
+    tracker.update(&SequenceStep::SetTargetHart { hart_id: 1 }, &success_report());
+    let step = SequenceStep::Call {
+        label: "suspend".to_string(),
+        eid: 0x4853_4d,
+        fid: 3,
+        args: vec![
+            SequenceArg::Const { value: 0 },
+            SequenceArg::Const { value: 0 },
+            SequenceArg::Const { value: 0 },
+            SequenceArg::Const { value: 0 },
+            SequenceArg::Const { value: 0 },
+            SequenceArg::Const { value: 0 },
+        ],
+        expect: None,
+    };
+    tracker.update(&step, &success_report());
+    assert_eq!(tracker.hart_state(0), Some(HsmHartState::Started));
+    assert_eq!(tracker.hart_state(1), Some(HsmHartState::Suspended));
+}
