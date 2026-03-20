@@ -1,0 +1,26 @@
+{
+  "results": [
+    {
+      "actual": "Divergence",
+      "classification": "mismatch",
+      "expected": "Match",
+      "extension": "hsm",
+      "fid": "0x0",
+      "hash": "sequenceaaaa1111",
+      "impl_kind": "opensbi",
+      "input": "fixture-sequence-a.seq",
+      "input_kind": "sequence",
+      "interesting": true,
+      "memory_signature": "mem:none",
+      "notes": [],
+      "output_excerpt": "sequence divergence observed",
+      "eid": "0x48534D",
+      "semantic_signature": "call:0x48534D:0x0",
+      "signals": [],
+      "signature": "divergence:status",
+      "state_signature": "state:hart0:started",
+      "temporal_signature": "seq:2:abcd1234",
+      "trap": null
+    }
+  ]
+}

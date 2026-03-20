@@ -175,6 +175,8 @@ SBIFUZZ_USE_FIXTURES=1 make report-all
 
 This fixture mode exercises the same top-level orchestration and validates the generated artifact contract without requiring a live long-running fuzz campaign.
 
+The integrated S0 path now uses `output/host_fuzz/` as its canonical artifact root, so `smoke-all` and `report-all` operate on the same logs and target directories instead of splitting smoke artifacts into a separate tree.
+
 This smoke run performs three checks in order:
 
 1. an intentional `fuzz_harness_smoke` crash to verify the libFuzzer crash/artifact pipeline;

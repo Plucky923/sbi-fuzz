@@ -7,7 +7,9 @@ import time
 from pathlib import Path
 
 from campaign_utils import (
+    bug_ids_from_summary,
     collect_repo_metadata,
+    compute_finding_sets,
     load_profile,
     path_metadata,
     prepare_env,
@@ -85,6 +87,7 @@ def main() -> int:
     parser.add_argument("--replay-limit", type=int)
     parser.add_argument("--timeout-secs", type=int)
     parser.add_argument("--json-out", type=Path)
+    parser.add_argument("--previous-summary", type=Path)
     parser.add_argument("--prepare-cmd")
     args = parser.parse_args()
 
@@ -215,6 +218,12 @@ def main() -> int:
         stdout_path=campaign_dir / "bugs.stdout.json",
     )
     bugs = json.loads(bug_json.read_text())
+    previous_summary = (
+        json.loads(args.previous_summary.read_text())
+        if args.previous_summary and args.previous_summary.exists()
+        else None
+    )
+    finding_sets = compute_finding_sets(bug_ids_from_summary(bugs), previous_summary)
 
     summary = {
         "name": args.name,
@@ -229,6 +238,8 @@ def main() -> int:
         "replayed_sequences": replay.get("total", 0),
         "interesting_replays": replay.get("interesting", 0),
         "candidate_count": bugs.get("candidate_count", 0),
+        "previous_summary_path": str(args.previous_summary) if args.previous_summary else None,
+        "finding_sets": finding_sets,
         "by_classification": replay.get("by_classification", {}),
         "bug_signatures": bugs.get("by_signature", {}),
         "selected_inputs": [item["path"] for item in selected],

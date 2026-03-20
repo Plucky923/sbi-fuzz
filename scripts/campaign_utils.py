@@ -117,3 +117,54 @@ def path_metadata(path: Path):
 
 def write_json(path: Path, payload: dict):
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+
+
+def bug_ids_from_summary(summary: dict | None):
+    if not summary:
+        return []
+    buckets = summary.get("buckets")
+    if isinstance(buckets, dict):
+        return sorted({bucket.get("bug_id") or key for key, bucket in buckets.items()})
+    return []
+
+
+def previous_bug_ids(summary: dict | None):
+    if not summary:
+        return set(), set()
+    finding_sets = summary.get("finding_sets") if isinstance(summary.get("finding_sets"), dict) else {}
+    current_ids = finding_sets.get("current_bug_ids")
+    fixed_ids = finding_sets.get("fixed_bug_ids")
+
+    if current_ids is None:
+        if isinstance(summary.get("current_bug_ids"), list):
+            current_ids = summary["current_bug_ids"]
+        elif isinstance(summary.get("confirmed_bug_like_buckets"), dict):
+            current_ids = [
+                bucket.get("bug_id") or key
+                for key, bucket in summary["confirmed_bug_like_buckets"].items()
+            ]
+        elif isinstance(summary.get("bug_signatures"), dict):
+            current_ids = list(summary["bug_signatures"].keys())
+        else:
+            current_ids = []
+
+    if fixed_ids is None:
+        fixed_ids = []
+
+    return set(current_ids), set(fixed_ids)
+
+
+def compute_finding_sets(current_bug_ids: list[str], previous_summary: dict | None):
+    current = set(current_bug_ids)
+    previous_current, previous_fixed = previous_bug_ids(previous_summary)
+    regressed = current & previous_fixed
+    persisting = current & previous_current
+    new = current - previous_current - regressed
+    fixed = previous_current - current
+    return {
+        "current_bug_ids": sorted(current),
+        "new_bug_ids": sorted(new),
+        "fixed_bug_ids": sorted(fixed),
+        "regressed_bug_ids": sorted(regressed),
+        "persisting_bug_ids": sorted(persisting),
+    }

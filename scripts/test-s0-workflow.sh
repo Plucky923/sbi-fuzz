@@ -11,13 +11,15 @@ SBIFUZZ_USE_FIXTURES=1 make -C "$repo_root" preflight
 SBIFUZZ_USE_FIXTURES=1 make -C "$repo_root" smoke-all
 SBIFUZZ_USE_FIXTURES=1 make -C "$repo_root" report-all
 
-test -f "$repo_root/output/host_fuzz_smoke/logs/fuzz_ecall_opensbi.log"
-test -f "$repo_root/output/host_fuzz_smoke/logs/fuzz_ecall_rustsbi.log"
-test -f "$repo_root/output/host_fuzz_smoke/logs/fuzz_sequence_both.log"
-test -f "$repo_root/output/host_fuzz_smoke/logs/fuzz_diff_ecall.log"
-test -f "$repo_root/output/host_fuzz_smoke/logs/fuzz_diff_sequence.log"
+test -f "$repo_root/output/host_fuzz/logs/fuzz_ecall_opensbi.log"
+test -f "$repo_root/output/host_fuzz/logs/fuzz_ecall_rustsbi.log"
+test -f "$repo_root/output/host_fuzz/logs/fuzz_sequence_both.log"
+test -f "$repo_root/output/host_fuzz/logs/fuzz_diff_ecall.log"
+test -f "$repo_root/output/host_fuzz/logs/fuzz_diff_sequence.log"
 test -f "$repo_root/output/host_fuzz/triage.json"
 test -f "$repo_root/output/host_fuzz/triage.md"
+test -f "$repo_root/output/host_fuzz/opensbi.triage.json"
+test -f "$repo_root/output/host_fuzz/opensbi.triage.md"
 test -f "$repo_root/output/host_fuzz/metrics.json"
 test -f "$repo_root/output/host_fuzz/opensbi.bugs.json"
 test -f "$repo_root/output/host_fuzz/opensbi.bugs.md"

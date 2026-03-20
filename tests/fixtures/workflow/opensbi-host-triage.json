@@ -1,0 +1,43 @@
+{
+  "by_target": {
+    "opensbi": 1
+  },
+  "by_violation_type": {
+    "spec_violation": 1
+  },
+  "buckets": {
+    "opensbi|16|0|spec_violation|semantic:hart0:raw->base_get_spec_version": {
+      "affected_target": "opensbi",
+      "bug_id": "bug-fixture-opensbi-spec",
+      "classification": "spec_violation",
+      "count": 1,
+      "dedup_key": "opensbi|16|0|spec_violation|semantic:hart0:raw->base_get_spec_version",
+      "eid": 16,
+      "fid": 0,
+      "first_seen": "2026-03-20T00:00:00Z",
+      "hashes": [
+        "fixtureopensbi01"
+      ],
+      "impact": "spec_violation",
+      "last_seen": "2026-03-20T00:00:00Z",
+      "reproducer": "tests/regression/host/base_get_spec_version.json",
+      "repro_stability": {
+        "attempts": 1,
+        "label": "single_replay",
+        "stable_ratio": 1.0
+      },
+      "target_kind": "opensbi",
+      "violation_detail": "semantic:hart0:raw->base_get_spec_version",
+      "violation_type": "spec_violation"
+    }
+  },
+  "generated_at_utc": "2026-03-20T00:00:00Z",
+  "report_type": "host_triage",
+  "results": [
+    {
+      "confirmed": true
+    }
+  ],
+  "schema_version": 1,
+  "total_cases": 1
+}

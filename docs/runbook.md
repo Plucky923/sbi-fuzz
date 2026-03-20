@@ -35,9 +35,16 @@ make report-all
 
 Expected outputs:
 
-- `output/host_fuzz_smoke/` for smoke artifacts and logs
+- `output/host_fuzz/logs/` for integrated S0 smoke and report logs
+- `output/host_fuzz/fuzz_ecall_opensbi/`
+- `output/host_fuzz/fuzz_ecall_rustsbi/`
+- `output/host_fuzz/fuzz_sequence_both/`
+- `output/host_fuzz/fuzz_diff_ecall/`
+- `output/host_fuzz/fuzz_diff_sequence/`
 - `output/host_fuzz/triage.json`
 - `output/host_fuzz/triage.md`
+- `output/host_fuzz/opensbi.triage.json`
+- `output/host_fuzz/opensbi.triage.md`
 - `output/host_fuzz/metrics.json`
 - `output/host_fuzz/opensbi.bugs.json`
 - `output/host_fuzz/opensbi.bugs.md`
@@ -48,7 +55,8 @@ Success criteria:
 
 - `make smoke-all` exits with status `0`
 - smoke logs exist for `fuzz_ecall_opensbi`, `fuzz_ecall_rustsbi`, `fuzz_sequence_both`, `fuzz_diff_ecall`, and `fuzz_diff_sequence`
-- `make report-all` exits with status `0`
+- `make report-all` writes the documented artifacts even when the quality gate blocks on findings
+- `make report-all` exits with status `0` only when the quality gate passes; blocker findings are expected to return non-zero
 - the generated `triage.json`, `opensbi.bugs.json`, `cross-layer.json`, and `quality_gate.json` all pass schema validation
 
 Escalation:
@@ -156,12 +164,14 @@ Escalation:
 ## Artifact Map
 
 - Host smoke logs: `output/host_fuzz_smoke/logs/`
-- Host fuzz logs: `output/host_fuzz/logs/`
+- Integrated S0 logs: `output/host_fuzz/logs/`
 - Host triage outputs: `output/host_fuzz/triage.json`, `output/host_fuzz/triage.md`
+- OpenSBI host triage mirror: `output/host_fuzz/opensbi.triage.json`, `output/host_fuzz/opensbi.triage.md`
 - Host metrics: `output/host_fuzz/metrics.json`
 - OpenSBI bug report mirror: `output/host_fuzz/opensbi.bugs.json`, `output/host_fuzz/opensbi.bugs.md`
 - Cross-layer dedup output: `output/host_fuzz/cross-layer.json`
 - Host gate result: `output/host_fuzz/quality_gate.json`
+- Standalone `make host-fuzz-smoke` logs: `output/host_fuzz_smoke/logs/`
 - OpenSBI campaign summary: `playground/opensbi-fuzz/output/campaign/latest.json`
 - RustSBI campaign summary: `playground/rustsbi-fuzz/output/campaign/latest.json`
 
