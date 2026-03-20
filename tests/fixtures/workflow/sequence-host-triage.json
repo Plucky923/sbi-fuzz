@@ -1,0 +1,67 @@
+{
+  "by_target": {
+    "rustsbi": 1
+  },
+  "by_violation_type": {
+    "hang": 1
+  },
+  "buckets": {
+    "rustsbi|16|2|hang|semantic:sequence-hsm-status": {
+      "affected_target": "rustsbi",
+      "bug_id": "bug-fixture-sequence",
+      "classification": "hang",
+      "count": 1,
+      "dedup_key": "rustsbi|16|2|hang|semantic:sequence-hsm-status",
+      "eid": 16,
+      "fid": 2,
+      "first_seen": "2026-03-20T00:00:00Z",
+      "hashes": [
+        "fixturesequence01"
+      ],
+      "impact": "hang",
+      "last_seen": "2026-03-20T00:00:00Z",
+      "repro_stability": {
+        "attempts": 1,
+        "label": "single_replay",
+        "stable_ratio": 1.0
+      },
+      "reproducer": "tests/regression/sequence/shared_base_hsm_status.json",
+      "target_kind": "rustsbi",
+      "violation_detail": "semantic:sequence-hsm-status",
+      "violation_type": "hang"
+    }
+  },
+  "generated_at_utc": "2026-03-20T00:00:00Z",
+  "report_type": "host_triage",
+  "results": [
+    {
+      "affected_target": "rustsbi",
+      "bug_id": "bug-fixture-sequence",
+      "classification": "hang",
+      "confirmed": false,
+      "dedup_key": "rustsbi|16|2|hang|semantic:sequence-hsm-status",
+      "eid": 16,
+      "fid": 2,
+      "first_seen": "2026-03-20T00:00:00Z",
+      "hash": "fixturesequence01",
+      "impact": "hang",
+      "label": "fixture-sequence",
+      "last_seen": "2026-03-20T00:00:00Z",
+      "memory_violations": [],
+      "mode": "sequence",
+      "path": "tests/regression/sequence/shared_base_hsm_status.json",
+      "repro_stability": {
+        "attempts": 1,
+        "label": "single_replay",
+        "stable_ratio": 1.0
+      },
+      "signature": "sequence:semantic:sequence-hsm-status",
+      "spec_violations": [],
+      "target_kind": "rustsbi",
+      "violation_detail": "semantic:sequence-hsm-status",
+      "violation_type": "hang"
+    }
+  ],
+  "schema_version": 1,
+  "total_cases": 1
+}

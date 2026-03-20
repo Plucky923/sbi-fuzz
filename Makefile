@@ -107,7 +107,7 @@ host-fuzz-diff-ecall:
 host-fuzz-diff-sequence:
 	@./scripts/run-host-harness-fuzz.sh fuzz_diff_sequence
 
-report-all: smoke-all
+report-all:
 	@./scripts/run-report-all.sh
 
 host-fuzz-60:
@@ -257,7 +257,7 @@ help:
 	@echo "  host-fuzz-diff         - Run both host-side differential fuzz targets (ecall and sequence)"
 	@echo "  host-fuzz-diff-ecall   - Run the host-side differential ecall fuzz target"
 	@echo "  host-fuzz-diff-sequence - Run the host-side differential sequence fuzz target"
-	@echo "  report-all             - Run the documented S0 report chain and validate generated artifacts"
+	@echo "  report-all             - Summarize the latest S0 smoke outputs and validate generated artifacts"
 	@echo "  host-fuzz-60           - Launch a 60-worker RustSBI host_harness fuzz campaign"
 	@echo "  host-fuzz-60-complex   - Launch a 60-worker multi-hart sequence campaign"
 	@echo "  test-linux-corpus-import - Validate Linux-style SBI corpus import"

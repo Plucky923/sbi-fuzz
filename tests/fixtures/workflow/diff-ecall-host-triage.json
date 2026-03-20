@@ -1,0 +1,67 @@
+{
+  "by_target": {
+    "both": 1
+  },
+  "by_violation_type": {
+    "mismatch": 1
+  },
+  "buckets": {
+    "both|16|0|mismatch|semantic:diff-ecall-base": {
+      "affected_target": "both",
+      "bug_id": "bug-fixture-diff-ecall",
+      "classification": "mismatch",
+      "count": 1,
+      "dedup_key": "both|16|0|mismatch|semantic:diff-ecall-base",
+      "eid": 16,
+      "fid": 0,
+      "first_seen": "2026-03-20T00:00:00Z",
+      "hashes": [
+        "fixturediffecall01"
+      ],
+      "impact": "spec_violation",
+      "last_seen": "2026-03-20T00:00:00Z",
+      "repro_stability": {
+        "attempts": 1,
+        "label": "single_replay",
+        "stable_ratio": 1.0
+      },
+      "reproducer": "tests/regression/host/base_get_spec_version.json",
+      "target_kind": "both",
+      "violation_detail": "semantic:diff-ecall-base",
+      "violation_type": "mismatch"
+    }
+  },
+  "generated_at_utc": "2026-03-20T00:00:00Z",
+  "report_type": "host_triage",
+  "results": [
+    {
+      "affected_target": "both",
+      "bug_id": "bug-fixture-diff-ecall",
+      "classification": "mismatch",
+      "confirmed": false,
+      "dedup_key": "both|16|0|mismatch|semantic:diff-ecall-base",
+      "eid": 16,
+      "fid": 0,
+      "first_seen": "2026-03-20T00:00:00Z",
+      "hash": "fixturediffecall01",
+      "impact": "spec_violation",
+      "label": "fixture-diff-ecall",
+      "last_seen": "2026-03-20T00:00:00Z",
+      "memory_violations": [],
+      "mode": "diff",
+      "path": "tests/regression/host/base_get_spec_version.json",
+      "repro_stability": {
+        "attempts": 1,
+        "label": "single_replay",
+        "stable_ratio": 1.0
+      },
+      "signature": "diff:semantic:diff-ecall-base",
+      "spec_violations": [],
+      "target_kind": "both",
+      "violation_detail": "semantic:diff-ecall-base",
+      "violation_type": "mismatch"
+    }
+  ],
+  "schema_version": 1,
+  "total_cases": 1
+}

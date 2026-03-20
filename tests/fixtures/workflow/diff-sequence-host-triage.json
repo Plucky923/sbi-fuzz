@@ -1,0 +1,67 @@
+{
+  "by_target": {
+    "both": 1
+  },
+  "by_violation_type": {
+    "mismatch": 1
+  },
+  "buckets": {
+    "both|1145193294|1|mismatch|semantic:diff-sequence-console": {
+      "affected_target": "both",
+      "bug_id": "bug-fixture-diff-sequence",
+      "classification": "mismatch",
+      "count": 1,
+      "dedup_key": "both|1145193294|1|mismatch|semantic:diff-sequence-console",
+      "eid": 1145193294,
+      "fid": 1,
+      "first_seen": "2026-03-20T00:00:00Z",
+      "hashes": [
+        "fixturediffsequence01"
+      ],
+      "impact": "spec_violation",
+      "last_seen": "2026-03-20T00:00:00Z",
+      "repro_stability": {
+        "attempts": 1,
+        "label": "single_replay",
+        "stable_ratio": 1.0
+      },
+      "reproducer": "tests/regression/host/console_write.json",
+      "target_kind": "both",
+      "violation_detail": "semantic:diff-sequence-console",
+      "violation_type": "mismatch"
+    }
+  },
+  "generated_at_utc": "2026-03-20T00:00:00Z",
+  "report_type": "host_triage",
+  "results": [
+    {
+      "affected_target": "both",
+      "bug_id": "bug-fixture-diff-sequence",
+      "classification": "mismatch",
+      "confirmed": false,
+      "dedup_key": "both|1145193294|1|mismatch|semantic:diff-sequence-console",
+      "eid": 1145193294,
+      "fid": 1,
+      "first_seen": "2026-03-20T00:00:00Z",
+      "hash": "fixturediffsequence01",
+      "impact": "spec_violation",
+      "label": "fixture-diff-sequence",
+      "last_seen": "2026-03-20T00:00:00Z",
+      "memory_violations": [],
+      "mode": "diff_sequence",
+      "path": "tests/regression/host/console_write.json",
+      "repro_stability": {
+        "attempts": 1,
+        "label": "single_replay",
+        "stable_ratio": 1.0
+      },
+      "signature": "diff:semantic:diff-sequence-console",
+      "spec_violations": [],
+      "target_kind": "both",
+      "violation_detail": "semantic:diff-sequence-console",
+      "violation_type": "mismatch"
+    }
+  ],
+  "schema_version": 1,
+  "total_cases": 1
+}

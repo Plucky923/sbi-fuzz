@@ -164,6 +164,7 @@ make report-all
 ```
 
 The scenario-to-command mapping and expected artifact paths are documented in `docs/runbook.md`.
+`make report-all` summarizes the latest S0 smoke outputs; it does not start a second smoke run.
 
 For deterministic workflow validation in review or CI environments that do not have the full host fuzz and playground toolchain available, use:
 

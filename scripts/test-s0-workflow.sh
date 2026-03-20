@@ -9,6 +9,7 @@ find "$repo_root/output/host_fuzz_smoke" -mindepth 1 -delete 2>/dev/null || true
 
 SBIFUZZ_USE_FIXTURES=1 make -C "$repo_root" preflight
 SBIFUZZ_USE_FIXTURES=1 make -C "$repo_root" smoke-all
+printf 'sentinel\n' > "$repo_root/output/host_fuzz/logs/report-all-preserves-smoke.log"
 SBIFUZZ_USE_FIXTURES=1 make -C "$repo_root" report-all
 
 test -f "$repo_root/output/host_fuzz/logs/fuzz_ecall_opensbi.log"
@@ -16,8 +17,10 @@ test -f "$repo_root/output/host_fuzz/logs/fuzz_ecall_rustsbi.log"
 test -f "$repo_root/output/host_fuzz/logs/fuzz_sequence_both.log"
 test -f "$repo_root/output/host_fuzz/logs/fuzz_diff_ecall.log"
 test -f "$repo_root/output/host_fuzz/logs/fuzz_diff_sequence.log"
+test -f "$repo_root/output/host_fuzz/logs/report-all-preserves-smoke.log"
 test -f "$repo_root/output/host_fuzz/triage.json"
 test -f "$repo_root/output/host_fuzz/triage.md"
+test -f "$repo_root/output/host_fuzz/triage-parts/fuzz_diff_sequence.json"
 test -f "$repo_root/output/host_fuzz/opensbi.triage.json"
 test -f "$repo_root/output/host_fuzz/opensbi.triage.md"
 test -f "$repo_root/output/host_fuzz/metrics.json"
@@ -30,5 +33,6 @@ python3 "$repo_root/scripts/validate-report-artifacts.py" "$repo_root/output/hos
 python3 "$repo_root/scripts/validate-report-artifacts.py" "$repo_root/output/host_fuzz/opensbi.bugs.json" --kind bug-report >/dev/null
 python3 "$repo_root/scripts/validate-report-artifacts.py" "$repo_root/output/host_fuzz/cross-layer.json" --kind cross-layer >/dev/null
 python3 "$repo_root/scripts/validate-report-artifacts.py" "$repo_root/output/host_fuzz/quality_gate.json" --kind quality-gate >/dev/null
+rg -n '"total_cases": 6' "$repo_root/output/host_fuzz/triage.json" >/dev/null
 
 echo "s0 workflow test passed"

@@ -33,6 +33,8 @@ make smoke-all
 make report-all
 ```
 
+`make report-all` summarizes the latest S0 smoke outputs. It does not launch a fresh smoke run on its own.
+
 Expected outputs:
 
 - `output/host_fuzz/logs/` for integrated S0 smoke and report logs
