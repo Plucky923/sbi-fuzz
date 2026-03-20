@@ -188,7 +188,7 @@ def previous_bug_ids(summary: dict | None, summary_path: Path | None = None):
             current_ids = summary["current_bug_ids"]
         elif isinstance(summary.get("confirmed_bug_like_buckets"), dict):
             current_ids = [
-                bucket.get("bug_id") or key
+                bucket.get("bug_id") or canonical_bug_id_from_legacy_bucket(summary, key, bucket)
                 for key, bucket in summary["confirmed_bug_like_buckets"].items()
             ]
         elif isinstance(summary.get("artifacts"), dict) and summary["artifacts"].get("bug_json"):
