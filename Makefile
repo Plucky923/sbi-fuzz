@@ -9,11 +9,21 @@ all: compile
 compile: helper injector
 	@echo ">>> All components built successfully"
 
+docs-check:
+	@python3 ./scripts/check-docs.py ./Readme.md ./docs/runbook.md
+
 check-env:
 	@./scripts/check-env.sh
 
 check-env-smoke:
 	@./scripts/check-env.sh --full-smoke
+
+preflight:
+	@$(MAKE) docs-check
+	@$(MAKE) check-env
+	@$(MAKE) test-common
+	@$(MAKE) test-host-harness
+	@$(MAKE) test-regression
 
 test-common:
 	@cargo test -p common
@@ -24,6 +34,15 @@ test-host-harness:
 
 test-regression:
 	@bash ./scripts/test-regression.sh
+
+test-docs-check:
+	@bash ./scripts/test-docs-check.sh
+
+test-campaign-quality-gate:
+	@bash ./scripts/test-campaign-quality-gate.sh
+
+test-cross-layer-dedup:
+	@bash ./scripts/test-cross-layer-dedup.sh
 
 triage-host-fuzz:
 	@python3 ./scripts/triage-host-fuzz-results.py ./output/host_fuzz/fuzz_ecall_rustsbi --json-out ./output/host_fuzz/triage.json --md-out ./output/host_fuzz/triage.md
@@ -42,6 +61,8 @@ cross-layer-dedup:
 host-fuzz-corpus:
 	@./scripts/prepare-host-fuzz-corpus.sh
 
+smoke-all: preflight host-fuzz-corpus host-fuzz-smoke
+
 host-fuzz-smoke:
 	@./scripts/smoke-host-harness-fuzz.sh
 
@@ -51,8 +72,20 @@ host-fuzz-rustsbi:
 host-fuzz-sequence:
 	@./scripts/run-host-harness-fuzz.sh fuzz_sequence_both
 
-host-fuzz-diff:
+host-fuzz-diff: host-fuzz-diff-ecall host-fuzz-diff-sequence
+
+host-fuzz-diff-ecall:
 	@./scripts/run-host-harness-fuzz.sh fuzz_diff_ecall
+
+host-fuzz-diff-sequence:
+	@./scripts/run-host-harness-fuzz.sh fuzz_diff_sequence
+
+report-all: smoke-all
+	@$(MAKE) triage-host-fuzz
+	@python3 ./scripts/validate-report-artifacts.py ./output/host_fuzz/triage.json --kind host-triage
+	@$(MAKE) collect-metrics
+	@$(MAKE) quality-gate
+	@python3 ./scripts/validate-report-artifacts.py ./output/host_fuzz/quality_gate.json --kind quality-gate
 
 host-fuzz-60:
 	@SBIFUZZ_FUZZ_JOBS=60 SBIFUZZ_FUZZ_WORKERS=60 SBIFUZZ_FUZZ_DURATION_SECS=$${SBIFUZZ_FUZZ_DURATION_SECS:-300} ./scripts/run-host-harness-fuzz.sh fuzz_ecall_rustsbi
@@ -171,21 +204,30 @@ help:
 	@echo "Available targets:"
 	@echo "  all (default)          - Build all components"
 	@echo "  compile                - Same as 'all'"
+	@echo "  docs-check             - Validate README and runbook links plus documented make targets"
 	@echo "  check-env              - Probe required and optional tooling"
 	@echo "  check-env-smoke        - Probe tooling and run build smoke checks"
+	@echo "  preflight              - Run docs validation, environment checks, and deterministic tests"
 	@echo "  test-common            - Run common crate automated tests"
 	@echo "  test-host-harness      - Validate the host-side OpenSBI layered harness and helper CLI"
 	@echo "  test-regression        - Run deterministic host-side regression checks"
+	@echo "  test-docs-check        - Verify docs validation catches stale links and bad make targets"
+	@echo "  test-campaign-quality-gate - Verify quality gate blockers and warnings from synthetic history"
+	@echo "  test-cross-layer-dedup - Verify stable bug IDs merge across host and system report inputs"
 	@echo "  triage-host-fuzz       - Triage host_harness fuzz artifacts into JSON/Markdown"
 	@echo "  collect-metrics        - Summarize libFuzzer metrics from host-side logs"
 	@echo "  quality-gate           - Evaluate host-side campaign metrics and triage against thresholds"
 	@echo "  campaign-quality-gate  - Alias for 'quality-gate'"
 	@echo "  cross-layer-dedup      - Deduplicate available host/sequence/QEMU reports"
 	@echo "  host-fuzz-corpus       - Generate libFuzzer corpora for host_harness fuzz targets"
+	@echo "  smoke-all              - Run the documented S0 preflight, corpus generation, and smoke path"
 	@echo "  host-fuzz-smoke        - Verify crash-capture chain and run short host_harness fuzz smokes"
 	@echo "  host-fuzz-rustsbi      - Run the RustSBI host_harness libFuzzer target"
 	@echo "  host-fuzz-sequence     - Run the sequence-oriented dual-backend host_harness target"
-	@echo "  host-fuzz-diff         - Run the host-side differential ecall fuzz target"
+	@echo "  host-fuzz-diff         - Run both host-side differential fuzz targets (ecall and sequence)"
+	@echo "  host-fuzz-diff-ecall   - Run the host-side differential ecall fuzz target"
+	@echo "  host-fuzz-diff-sequence - Run the host-side differential sequence fuzz target"
+	@echo "  report-all             - Run the documented S0 report chain and validate generated artifacts"
 	@echo "  host-fuzz-60           - Launch a 60-worker RustSBI host_harness fuzz campaign"
 	@echo "  host-fuzz-60-complex   - Launch a 60-worker multi-hart sequence campaign"
 	@echo "  test-linux-corpus-import - Validate Linux-style SBI corpus import"
@@ -220,4 +262,4 @@ help:
 	@echo "  clean-generated        - Clean generated local samples and reports"
 	@echo "  help                   - Display this help message"
 
-.PHONY: all compile check-env check-env-smoke test-common test-host-harness test-regression test-linux-corpus-import test-opensbi-triage test-opensbi-replay test-opensbi-replay-summary test-opensbi-sanitizer-demo test-opensbi-coverage test-opensbi-bug-report test-rustsbi-scenarios test-rustsbi-replay test-rustsbi-helper-timeout test-rustsbi-collect-coverage-timeout test-rustsbi-hang-stability test-rustsbi-hang-minimize test-sbi-hang-semantic-buckets test-rustsbi-fuzz-finds-bug test-sequence-replay triage-host-fuzz collect-metrics quality-gate campaign-quality-gate cross-layer-dedup host-fuzz-corpus host-fuzz-smoke host-fuzz-rustsbi host-fuzz-sequence host-fuzz-diff host-fuzz-60 host-fuzz-60-complex sequence-seeds campaign-sequence-opensbi campaign-sequence-rustsbi campaign-opensbi campaign-rustsbi campaign-rustsbi-complex fuzzer helper injector clean clean-cargo clean-injector clean-playgrounds clean-generated help
+.PHONY: all compile docs-check check-env check-env-smoke preflight test-common test-host-harness test-regression test-docs-check test-campaign-quality-gate test-cross-layer-dedup test-linux-corpus-import test-opensbi-triage test-opensbi-replay test-opensbi-replay-summary test-opensbi-sanitizer-demo test-opensbi-coverage test-opensbi-bug-report test-rustsbi-scenarios test-rustsbi-replay test-rustsbi-helper-timeout test-rustsbi-collect-coverage-timeout test-rustsbi-hang-stability test-rustsbi-hang-minimize test-sbi-hang-semantic-buckets test-rustsbi-fuzz-finds-bug test-sequence-replay triage-host-fuzz collect-metrics quality-gate campaign-quality-gate cross-layer-dedup host-fuzz-corpus smoke-all host-fuzz-smoke host-fuzz-rustsbi host-fuzz-sequence host-fuzz-diff host-fuzz-diff-ecall host-fuzz-diff-sequence report-all host-fuzz-60 host-fuzz-60-complex sequence-seeds campaign-sequence-opensbi campaign-sequence-rustsbi campaign-opensbi campaign-rustsbi campaign-rustsbi-complex fuzzer helper injector clean clean-cargo clean-injector clean-playgrounds clean-generated help

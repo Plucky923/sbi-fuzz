@@ -135,11 +135,18 @@ cat > "$hang_minimize_json" <<'JSON'
 }
 JSON
 python3 "$repo_root/scripts/report-opensbi-bugs.py" "$input_json" --hang-stability "$hang_stability_json" --hang-minimize "$hang_minimize_json" --json-out "$json_out" --md-out "$md_out" > "$out_dir/stdout.json"
+python3 "$repo_root/scripts/validate-report-artifacts.py" "$json_out" --kind bug-report >/dev/null
 
 rg -n '"candidate_count": 3' "$json_out" >/dev/null
+rg -n '"schema_version": 1' "$json_out" >/dev/null
+rg -n '"report_type": "bug_report"' "$json_out" >/dev/null
 rg -n '"sanitizer": 2' "$json_out" >/dev/null
 rg -n '"hang": 1' "$json_out" >/dev/null
 rg -n '"stable_hang_cases": 1' "$json_out" >/dev/null
+rg -n '"affected_target": "opensbi"' "$json_out" >/dev/null
+rg -n '"bug_id": "bug-' "$json_out" >/dev/null
+rg -n '"dedup_key": "opensbi\|' "$json_out" >/dev/null
+rg -n --fixed-strings '"repro_stability": {' "$json_out" >/dev/null
 rg -n '"label": "stable_hang"' "$json_out" >/dev/null
 rg -n '"minimized_cases": 1' "$json_out" >/dev/null
 rg -n '"unique_semantic_signatures": 1' "$json_out" >/dev/null
@@ -150,6 +157,7 @@ rg -n 'signals:kasan' "$json_out" >/dev/null
 rg -n 'stability=stable_hang 3/3 score=1.00' "$md_out" >/dev/null
 rg -n 'instruction=signals:kasan' "$md_out" >/dev/null
 rg -n 'semantic=hart1:raw->base_get_impl_id' "$md_out" >/dev/null
+rg -n 'target=opensbi impact=crash' "$md_out" >/dev/null
 rg -n 'minimized=mini' "$md_out" >/dev/null
 rg -n 'OpenSBI Bug Report' "$md_out" >/dev/null
 

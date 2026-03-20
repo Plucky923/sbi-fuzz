@@ -4,6 +4,7 @@ import hashlib
 import json
 import subprocess
 from collections import Counter, defaultdict
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -44,6 +45,64 @@ def violation_signature(result: dict) -> tuple[str, str]:
     return report.get("classification", "ok"), report.get("signature", "none")
 
 
+def iso_utc_from_epoch(epoch: float) -> str:
+    return (
+        datetime.fromtimestamp(epoch, tz=timezone.utc)
+        .replace(microsecond=0)
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
+
+
+def utc_now() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def normalize_target_kind(value: str | None) -> str:
+    normalized = (value or "unknown").strip().lower()
+    if normalized in {"open_sbi", "opensbi", "open-sbi"}:
+        return "opensbi"
+    if normalized in {"rust_sbi", "rustsbi", "rust-sbi"}:
+        return "rustsbi"
+    return normalized or "unknown"
+
+
+def impact_for_entry(entry: dict) -> str:
+    classification = entry.get("classification")
+    violation_type = entry.get("violation_type")
+    if classification in {"sanitizer", "crash"}:
+        return "crash"
+    if classification == "hang":
+        return "hang"
+    if violation_type in {"spec_violation", "memory_violation"} or entry.get("confirmed"):
+        return "spec_violation"
+    return classification or "unknown"
+
+
+def make_dedup_key(target: str, eid, fid, violation_type: str, violation_detail: str) -> str:
+    return "|".join(
+        [
+            target,
+            str(eid),
+            str(fid),
+            violation_type or "unknown",
+            violation_detail or "none",
+        ]
+    )
+
+
+def make_bug_id(dedup_key: str) -> str:
+    return f"bug-{hashlib.sha256(dedup_key.encode()).hexdigest()[:12]}"
+
+
+def default_repro_stability() -> dict:
+    return {
+        "attempts": 1,
+        "label": "single_replay",
+        "stable_ratio": 1.0,
+    }
+
+
 def build_entry(path: Path, result: dict) -> dict:
     input_data = result["input"]
     report = result["report"]
@@ -51,10 +110,14 @@ def build_entry(path: Path, result: dict) -> dict:
     fid = report.get("fid", 0)
     violation_type, violation_detail = violation_signature(result)
     confirmed = bool(result.get("spec_violations") or result.get("memory_violations"))
+    observed_at = iso_utc_from_epoch(path.stat().st_mtime)
+    target_kind = normalize_target_kind(report.get("target_kind"))
+    dedup_key = make_dedup_key(target_kind, eid, fid, violation_type, violation_detail)
+    impact = "spec_violation" if confirmed else report.get("classification") or "unknown"
     return {
         "path": str(path),
         "hash": hashlib.sha256(path.read_bytes()).hexdigest()[:12],
-        "target_kind": report.get("target_kind"),
+        "target_kind": target_kind,
         "mode": report.get("mode"),
         "eid": eid,
         "fid": fid,
@@ -66,26 +129,28 @@ def build_entry(path: Path, result: dict) -> dict:
         "confirmed": confirmed,
         "violation_type": violation_type,
         "violation_detail": violation_detail,
+        "impact": impact,
+        "affected_target": target_kind,
+        "dedup_key": dedup_key,
+        "bug_id": make_bug_id(dedup_key),
+        "repro_stability": default_repro_stability(),
+        "first_seen": observed_at,
+        "last_seen": observed_at,
     }
 
 
 def summarize(entries: list[dict]) -> dict:
     grouped: dict[str, list[dict]] = defaultdict(list)
     for entry in entries:
-        key = "|".join(
-            [
-                str(entry.get("target_kind")),
-                hex(entry.get("eid", 0)),
-                hex(entry.get("fid", 0)),
-                entry.get("violation_type", "none"),
-                entry.get("violation_detail", ""),
-            ]
-        )
+        key = entry["dedup_key"]
         grouped[key].append(entry)
 
     buckets = {}
     for key, items in sorted(grouped.items()):
         rep = items[0]
+        first_seen = min(item["first_seen"] for item in items)
+        last_seen = max(item["last_seen"] for item in items)
+        impact = impact_for_entry(rep)
         buckets[key] = {
             "count": len(items),
             "target_kind": rep.get("target_kind"),
@@ -96,9 +161,19 @@ def summarize(entries: list[dict]) -> dict:
             "classification": rep.get("classification"),
             "reproducer": rep.get("path"),
             "hashes": [item["hash"] for item in items],
+            "affected_target": rep.get("affected_target"),
+            "impact": impact,
+            "dedup_key": key,
+            "bug_id": rep.get("bug_id"),
+            "repro_stability": default_repro_stability(),
+            "first_seen": first_seen,
+            "last_seen": last_seen,
         }
 
     return {
+        "schema_version": 1,
+        "generated_at_utc": utc_now(),
+        "report_type": "host_triage",
         "total_cases": len(entries),
         "by_target": dict(Counter(entry["target_kind"] for entry in entries)),
         "by_violation_type": dict(Counter(entry["violation_type"] for entry in entries)),
@@ -124,7 +199,7 @@ def write_markdown(summary: dict, path: Path) -> None:
     lines += ["", "## Buckets", ""]
     for key, bucket in summary["buckets"].items():
         lines.append(
-            f"- `{key}` x{bucket['count']} -> `{bucket['reproducer']}` | eid=0x{bucket['eid']:x} fid=0x{bucket['fid']:x} | type={bucket['violation_type']} | class={bucket['classification']}"
+            f"- `{bucket['bug_id']}` x{bucket['count']} -> `{bucket['reproducer']}` | eid=0x{bucket['eid']:x} fid=0x{bucket['fid']:x} | type={bucket['violation_type']} | class={bucket['classification']} | impact={bucket['impact']}"
         )
     path.write_text("\n".join(lines) + "\n")
 

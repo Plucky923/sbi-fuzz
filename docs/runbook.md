@@ -1,0 +1,151 @@
+# sbi-fuzz Scenario Runbook
+
+This runbook maps the repository's supported workflows to concrete commands, expected artifacts, and escalation paths.
+
+## Scope
+
+- S0 covers the minimum local regression path for repository changes.
+- S1 through S3 stay on the host-side harness for faster fuzzing and replay.
+- S4 escalates to the system-level playgrounds once the host-side path is healthy.
+
+## Prerequisites
+
+Run the local probes first:
+
+```bash
+make preflight
+```
+
+This checks the environment, validates repository docs, and runs deterministic tests before fuzzing.
+
+## S0: Quick Regression
+
+Use S0 before opening a PR or after touching the harness, replay scripts, or report pipeline.
+
+```bash
+make smoke-all
+make report-all
+```
+
+Expected outputs:
+
+- `output/host_fuzz_smoke/` for smoke artifacts and logs
+- `output/host_fuzz/triage.json`
+- `output/host_fuzz/triage.md`
+- `output/host_fuzz/metrics.json`
+- `output/host_fuzz/quality_gate.json`
+
+Escalation:
+
+- If `make smoke-all` fails before fuzzing starts, fix the local environment or deterministic tests first.
+- If `make smoke-all` reports a finding and writes an artifact, treat that as an infrastructure success and continue to reporting.
+- If `make report-all` fails validation, inspect the generated JSON schema before running longer campaigns.
+
+## S1: Single-Implementation Host Fuzzing
+
+Use S1 for fast RustSBI-oriented discovery after S0 is green.
+
+```bash
+make host-fuzz-rustsbi
+make triage-host-fuzz
+make collect-metrics
+make quality-gate
+```
+
+Expected outputs:
+
+- `output/host_fuzz/fuzz_ecall_rustsbi/`
+- `output/host_fuzz/logs/fuzz_ecall_rustsbi.log`
+- `output/host_fuzz/triage.json`
+- `output/host_fuzz/metrics.json`
+- `output/host_fuzz/quality_gate.json`
+
+Escalation:
+
+- If the fuzz target exits non-zero without an artifact, inspect `output/host_fuzz/logs/fuzz_ecall_rustsbi.log`.
+- If the quality gate blocks on new crash-like findings, preserve the bug IDs and move the reproducer into follow-up replay or regression work.
+
+## S2: Stateful Sequence Fuzzing
+
+Use S2 for multi-hart and state-machine coverage.
+
+```bash
+make host-fuzz-sequence
+make triage-host-fuzz
+make collect-metrics
+make quality-gate
+```
+
+Expected outputs:
+
+- `output/host_fuzz/fuzz_sequence_both/`
+- `output/host_fuzz/logs/fuzz_sequence_both.log`
+
+Escalation:
+
+- If sequence findings depend on a larger topology, rerun with `SBIFUZZ_HOST_SEQUENCE_SMP=<n>`.
+- If hangs appear, preserve the sequence input and confirm whether the same topology is used during replay.
+
+## S3: Differential Consistency Fuzzing
+
+Use S3 when you need cross-implementation mismatch coverage. The public differential entry point runs both single-call and sequence-oriented targets.
+
+```bash
+make host-fuzz-diff
+```
+
+Expected outputs:
+
+- `output/host_fuzz/fuzz_diff_ecall/`
+- `output/host_fuzz/fuzz_diff_sequence/`
+- `output/host_fuzz/logs/fuzz_diff_ecall.log`
+- `output/host_fuzz/logs/fuzz_diff_sequence.log`
+
+Escalation:
+
+- If only one differential artifact family appears, treat that as an incomplete S3 run.
+- Preserve mismatch reproducers together with their topology and sequence metadata before triage or replay.
+
+## S4: System-Level Confirmation
+
+Use S4 after host-side results are stable and reproducible.
+
+```bash
+make campaign-opensbi
+make campaign-rustsbi
+```
+
+Expected outputs:
+
+- `playground/opensbi-fuzz/output/campaign/latest.json`
+- `playground/rustsbi-fuzz/output/campaign/latest.json`
+- `playground/opensbi-fuzz/output/bugs/result.bugs.json`
+- `playground/rustsbi-fuzz/output/bugs/result.bugs.json`
+
+Escalation:
+
+- If the target image is missing, run `make -C playground/opensbi-fuzz prepare` or `make -C playground/rustsbi-fuzz prepare`.
+- If a host-side finding disappears at S4, keep both artifact paths and replay logs for cross-layer dedup instead of treating it as automatically resolved.
+
+## Artifact Map
+
+- Host smoke logs: `output/host_fuzz_smoke/logs/`
+- Host fuzz logs: `output/host_fuzz/logs/`
+- Host triage outputs: `output/host_fuzz/triage.json`, `output/host_fuzz/triage.md`
+- Host metrics: `output/host_fuzz/metrics.json`
+- Host gate result: `output/host_fuzz/quality_gate.json`
+- OpenSBI campaign summary: `playground/opensbi-fuzz/output/campaign/latest.json`
+- RustSBI campaign summary: `playground/rustsbi-fuzz/output/campaign/latest.json`
+
+## Supported Entry Points
+
+```bash
+make preflight
+make smoke-all
+make report-all
+make host-fuzz-rustsbi
+make host-fuzz-sequence
+make host-fuzz-diff
+make campaign-opensbi
+make campaign-rustsbi
+```

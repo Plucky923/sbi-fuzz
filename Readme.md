@@ -155,6 +155,16 @@ make host-fuzz-corpus
 make host-fuzz-smoke
 ```
 
+For the documented S0 local regression loop, use:
+
+```bash
+make preflight
+make smoke-all
+make report-all
+```
+
+The scenario-to-command mapping and expected artifact paths are documented in `docs/runbook.md`.
+
 This smoke run performs three checks in order:
 
 1. an intentional `fuzz_harness_smoke` crash to verify the libFuzzer crash/artifact pipeline;
@@ -186,6 +196,8 @@ To run the host-side differential target that compares OpenSBI and RustSBI on th
 ```bash
 make host-fuzz-diff
 ```
+
+`make host-fuzz-diff` runs both `fuzz_diff_ecall` and `fuzz_diff_sequence`, so the public differential workflow covers both single-call and sequence-oriented mismatch hunting.
 
 The sequence-oriented host-side targets now accept `SBIFUZZ_HOST_SEQUENCE_SMP`, so `make host-fuzz-60-complex` drives structured `.seq` inputs with up to 60 modeled harts instead of the older fixed 4-hart topology. Host-side fuzz runs also disable LeakSanitizer by default (`SBIFUZZ_HOST_FUZZ_DETECT_LEAKS=0`) because this environment trips the known `LeakSanitizer does not work under ptrace` fatal and otherwise turns clean runs into false crashes.
 
@@ -389,9 +401,9 @@ Example test cases for OpenSBI and RustSBI are provided in the `playground` dire
 
 ## Roadmap
 
-See `TODO.md` for the threat model and phased implementation plan covering memory safety, hart-state races, resource exhaustion, and vendor-specific SBI extensions.
+See `docs/plan.md` for the current repository-scoped implementation plan.
 
-See `SYZKALLER_MIGRATION_PLAN.md` for the detailed next-step migration plan and per-step test strategy.
+See `docs/runbook.md` for the supported S0-S4 workflows, expected artifacts, and escalation paths.
 
 ## Development Environment
 

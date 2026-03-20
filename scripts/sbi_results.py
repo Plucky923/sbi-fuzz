@@ -7,6 +7,7 @@ import re
 import subprocess
 import tomllib
 from collections import Counter, defaultdict
+from datetime import datetime, timezone
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -180,6 +181,68 @@ def stability_details(item: dict, stability: dict | None = None) -> tuple[str, f
     if item.get("interesting") and item.get("classification") != "hang":
         return "single_replay", 1.0
     return "unrated", 0.0
+
+
+def utc_now() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def normalize_affected_target(value: str | None) -> str:
+    normalized = (value or "unknown").strip().lower()
+    if normalized in {"open_sbi", "opensbi", "open-sbi"}:
+        return "opensbi"
+    if normalized in {"rust_sbi", "rustsbi", "rust-sbi"}:
+        return "rustsbi"
+    if normalized in {"both", "diff"}:
+        return "both"
+    return normalized or "unknown"
+
+
+def affected_target_for_item(item: dict, target_hint: str | None = None) -> str:
+    classification = item.get("classification", "unknown")
+    if classification in {"mismatch", "match", "capability_mismatch"}:
+        return "both"
+    normalized = normalize_affected_target(
+        item.get("affected_target") or item.get("impl_kind") or item.get("target_kind")
+    )
+    if normalized == "unknown" and target_hint:
+        return normalize_affected_target(target_hint)
+    return normalized
+
+
+def impact_for_classification(classification: str | None) -> str:
+    if classification in {"sanitizer", "crash"}:
+        return "crash"
+    if classification == "hang":
+        return "hang"
+    if classification in {
+        "mismatch",
+        "capability_mismatch",
+        "expectation_failed",
+        "invalid_input",
+        "non_standard_error",
+        "fdt_error",
+    }:
+        return "spec_violation"
+    return classification or "unknown"
+
+
+def bug_id_for_dedup_key(dedup_key: str) -> str:
+    return f"bug-{hashlib.sha256(dedup_key.encode()).hexdigest()[:12]}"
+
+
+def repro_stability_metadata(item: dict, stability: dict | None = None) -> dict:
+    label, stable_ratio = stability_details(item, stability)
+    attempts = 0
+    if stability:
+        attempts = int(stability.get("attempts") or 0)
+    elif label == "single_replay":
+        attempts = 1
+    return {
+        "attempts": attempts,
+        "label": label,
+        "stable_ratio": stable_ratio,
+    }
 
 
 def load_sequence_program(path: Path):
@@ -800,8 +863,9 @@ def replay_result_entry(
     )
 
 
-def summarize_bug_report(results, hang_stability=None, hang_minimize=None):
+def summarize_bug_report(results, hang_stability=None, hang_minimize=None, target_hint: str | None = None):
     candidates = [item for item in results if item.get("interesting")]
+    observed_at = utc_now()
 
     def hang_stability_entry(item: dict):
         if not hang_stability:
@@ -890,9 +954,22 @@ def summarize_bug_report(results, hang_stability=None, hang_minimize=None):
     )
 
     for key, items, rep, layers in ordered_groups:
+        stability = hang_stability_entry(rep)
+        affected_target = affected_target_for_item(rep, target_hint)
+        dedup_key = "|".join(
+            [
+                affected_target,
+                rep.get("classification", "unknown"),
+                bucket_signature(rep),
+            ]
+        )
         buckets[key] = {
             "count": len(items),
+            "bug_id": bug_id_for_dedup_key(dedup_key),
             "classification": rep.get("classification"),
+            "impact": impact_for_classification(rep.get("classification")),
+            "affected_target": affected_target,
+            "dedup_key": dedup_key,
             "signature": bucket_signature(rep),
             "raw_signature": rep.get("signature"),
             "instruction_signature": layers["instruction_signature"],
@@ -916,9 +993,11 @@ def summarize_bug_report(results, hang_stability=None, hang_minimize=None):
             "temporal_signature": layers["temporal_signature"],
             "stability_label": layers["stability_label"],
             "stability_score": layers["stability_score"],
+            "repro_stability": repro_stability_metadata(rep, stability),
+            "first_seen": observed_at,
+            "last_seen": observed_at,
             "output_excerpt": rep.get("output_excerpt", "")[-1200:],
         }
-        stability = hang_stability_entry(rep)
         if stability:
             buckets[key]["hang_stability"] = stability
         minimized = hang_minimize_entry(rep)
@@ -926,6 +1005,9 @@ def summarize_bug_report(results, hang_stability=None, hang_minimize=None):
             buckets[key]["hang_minimize"] = minimized
 
     summary = {
+        "schema_version": 1,
+        "generated_at_utc": observed_at,
+        "report_type": "bug_report",
         "total_results": len(results),
         "candidate_count": len(candidates),
         "by_classification": dict(by_classification),
@@ -1028,7 +1110,7 @@ def write_bug_markdown(summary, output: Path, label: str):
         memory_text = bucket.get("memory_signature") or "none"
         temporal_text = bucket.get("temporal_signature") or "none"
         lines.append(
-            f"- `{key}` x{bucket['count']} -> `{bucket['input']}` | kind={bucket.get('input_kind', 'legacy_call')} impl={bucket.get('impl_kind') or 'none'} actual={bucket['actual']} expected={bucket['expected']} | signals={','.join(bucket['signals']) or 'none'} | trap={trap_text} | instruction={bucket.get('instruction_signature') or bucket.get('raw_signature') or 'none'} | state={state_text} | memory={memory_text} | temporal={temporal_text} | stability={stability_text} score={bucket.get('stability_score', 0.0):.2f} | semantic={semantic_text} | minimized={minimize_text} | log={log_path}"
+            f"- `{bucket['bug_id']}` x{bucket['count']} -> `{bucket['input']}` | kind={bucket.get('input_kind', 'legacy_call')} impl={bucket.get('impl_kind') or 'none'} target={bucket.get('affected_target', 'unknown')} impact={bucket.get('impact', 'unknown')} actual={bucket['actual']} expected={bucket['expected']} | signals={','.join(bucket['signals']) or 'none'} | trap={trap_text} | instruction={bucket.get('instruction_signature') or bucket.get('raw_signature') or 'none'} | state={state_text} | memory={memory_text} | temporal={temporal_text} | stability={stability_text} score={bucket.get('stability_score', 0.0):.2f} | semantic={semantic_text} | minimized={minimize_text} | log={log_path}"
         )
     output.write_text("\n".join(lines) + "\n")
 
@@ -1218,7 +1300,7 @@ def report_bugs_cli(default_label: str = "SBI") -> int:
     hang_minimize = (
         json.loads(args.hang_minimize.read_text()) if args.hang_minimize else None
     )
-    summary = summarize_bug_report(results, hang_stability, hang_minimize)
+    summary = summarize_bug_report(results, hang_stability, hang_minimize, args.label)
     encoded = json.dumps(summary, indent=2, sort_keys=True) + "\n"
     if args.json_out:
         args.json_out.write_text(encoded)
