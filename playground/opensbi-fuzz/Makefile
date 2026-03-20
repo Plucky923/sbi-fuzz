@@ -69,7 +69,9 @@ campaign:
 	@echo "> Running automated OpenSBI fuzz campaign..."
 	@if [ ! -d "output" ]; then $(MAKE) prepare; fi
 	@mkdir -p output/campaign
-	python3 ../../scripts/run-sbi-fuzz-campaign.py opensbi output/opensbi/build/platform/generic/firmware/fw_dynamic.bin ../../injector/build/injector.elf output/seed output/result --profile $${PROFILE:-single-hart-fast} --duration-secs $${DURATION_SECS:-300} --cores $${CORES:-1} --replay-max-buckets $${REPLAY_MAX_BUCKETS:-64} --helper-bin ../../target/release/helper --json-out output/campaign/latest.json > output/campaign/latest.stdout.json
+	@PREV_SUMMARY=""; \
+	if [ -f output/campaign/latest.json ]; then PREV_SUMMARY="--previous-summary output/campaign/latest.json"; fi; \
+	python3 ../../scripts/run-sbi-fuzz-campaign.py opensbi output/opensbi/build/platform/generic/firmware/fw_dynamic.bin ../../injector/build/injector.elf output/seed output/result --profile $${PROFILE:-single-hart-fast} --duration-secs $${DURATION_SECS:-300} --cores $${CORES:-1} --replay-max-buckets $${REPLAY_MAX_BUCKETS:-64} --helper-bin ../../target/release/helper $$PREV_SUMMARY --json-out output/campaign/latest.json > output/campaign/latest.stdout.json
 
 clean:
 	@echo "> Cleaning up..."

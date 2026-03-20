@@ -93,13 +93,17 @@ campaign:
 	@echo "> Running automated RustSBI prototyper fuzz campaign..."
 	@if [ ! -d "output/rustsbi" ]; then $(MAKE) prepare; fi
 	@mkdir -p output/campaign
-	python3 ../../scripts/run-sbi-fuzz-campaign.py rustsbi-prototyper $(RUSTSBI_TARGET) ../../injector/build/injector.elf output/seed output/result --profile $${PROFILE:-single-hart-fast} --duration-secs $${DURATION_SECS:-300} --cores $${CORES:-1} --smp $${SMP:-1} --replay-max-buckets $${REPLAY_MAX_BUCKETS:-64} --helper-bin ../../target/release/helper --json-out output/campaign/latest.json > output/campaign/latest.stdout.json
+	@PREV_SUMMARY=""; \
+	if [ -f output/campaign/latest.json ]; then PREV_SUMMARY="--previous-summary output/campaign/latest.json"; fi; \
+	python3 ../../scripts/run-sbi-fuzz-campaign.py rustsbi-prototyper $(RUSTSBI_TARGET) ../../injector/build/injector.elf output/seed output/result --profile $${PROFILE:-single-hart-fast} --duration-secs $${DURATION_SECS:-300} --cores $${CORES:-1} --smp $${SMP:-1} --replay-max-buckets $${REPLAY_MAX_BUCKETS:-64} --helper-bin ../../target/release/helper $$PREV_SUMMARY --json-out output/campaign/latest.json > output/campaign/latest.stdout.json
 
 campaign-complex: complex-seeds
 	@echo "> Running automated RustSBI complex-scenario campaign..."
 	@if [ ! -d "output/rustsbi" ]; then $(MAKE) prepare; fi
 	@mkdir -p output/campaign
-	python3 ../../scripts/run-sbi-fuzz-campaign.py rustsbi-prototyper-complex $(RUSTSBI_TARGET) ../../injector/build/injector.elf output/seed-complex output/result-complex --profile $${PROFILE:-multi-hart-race} --duration-secs $${DURATION_SECS:-300} --cores $${CORES:-1} --smp $${SMP:-4} --replay-max-buckets $${REPLAY_MAX_BUCKETS:-64} --helper-bin ../../target/release/helper --json-out output/campaign/latest-complex.json > output/campaign/latest-complex.stdout.json
+	@PREV_SUMMARY=""; \
+	if [ -f output/campaign/latest-complex.json ]; then PREV_SUMMARY="--previous-summary output/campaign/latest-complex.json"; fi; \
+	python3 ../../scripts/run-sbi-fuzz-campaign.py rustsbi-prototyper-complex $(RUSTSBI_TARGET) ../../injector/build/injector.elf output/seed-complex output/result-complex --profile $${PROFILE:-multi-hart-race} --duration-secs $${DURATION_SECS:-300} --cores $${CORES:-1} --smp $${SMP:-4} --replay-max-buckets $${REPLAY_MAX_BUCKETS:-64} --helper-bin ../../target/release/helper $$PREV_SUMMARY --json-out output/campaign/latest-complex.json > output/campaign/latest-complex.stdout.json
 
 clean:
 	@echo "> Cleaning up..."

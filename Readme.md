@@ -177,11 +177,14 @@ This fixture mode exercises the same top-level orchestration and validates the g
 
 The integrated S0 path now uses `output/host_fuzz/` as its canonical artifact root, so `smoke-all` and `report-all` operate on the same logs and target directories instead of splitting smoke artifacts into a separate tree.
 
-This smoke run performs three checks in order:
+This smoke run performs six checks in order:
 
 1. an intentional `fuzz_harness_smoke` crash to verify the libFuzzer crash/artifact pipeline;
 2. a short single-worker `fuzz_ecall_opensbi` run;
-3. a short single-worker `fuzz_ecall_rustsbi` and `fuzz_sequence_both` run.
+3. a short single-worker `fuzz_ecall_rustsbi` run;
+4. a short single-worker `fuzz_sequence_both` run;
+5. a short single-worker `fuzz_diff_ecall` run;
+6. a short single-worker `fuzz_diff_sequence` run.
 
 To launch the long-running 60-worker RustSBI host-side campaign after the smokes pass:
 
@@ -196,6 +199,8 @@ make triage-host-fuzz
 make collect-metrics
 make quality-gate
 ```
+
+`make report-all` now writes the integrated S0 artifacts under `output/host_fuzz/` and returns a non-zero exit status only when the quality gate intentionally blocks on findings or the generated artifacts fail validation.
 
 For the more complex multi-hart host-side sequence campaign, use:
 

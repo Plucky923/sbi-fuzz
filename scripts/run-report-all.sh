@@ -34,13 +34,19 @@ generate_opensbi_bug_report() {
 }
 
 run_quality_gate() {
+    local gate_rc=0
+    set +e
     python3 "$ROOT_DIR/scripts/campaign-quality-gate.py" \
         --metrics "$HOST_OUT_ROOT/metrics.json" \
         --triage "$HOST_OUT_ROOT/triage.json" \
         --min-total-runs "${SBIFUZZ_REPORT_MIN_TOTAL_RUNS:-0}" \
         --min-confirmed-ratio "${SBIFUZZ_REPORT_MIN_CONFIRMED_RATIO:-0}" \
+        --min-peak-exec-per-sec "${SBIFUZZ_REPORT_MIN_PEAK_EXEC_PER_SEC:-0}" \
         --json-out "$HOST_OUT_ROOT/quality_gate.json" \
         > "$HOST_OUT_ROOT/quality_gate.stdout.json"
+    gate_rc=$?
+    set -e
+    return "$gate_rc"
 }
 
 if [[ "$USE_FIXTURES" == "1" ]]; then
@@ -66,9 +72,10 @@ EOF
         "$OPENSBI_BUG_JSON" \
         --json-out "$HOST_OUT_ROOT/cross-layer.json" \
         > "$HOST_OUT_ROOT/cross-layer.stdout.json"
-    run_quality_gate
+    gate_rc=0
+    run_quality_gate || gate_rc=$?
     validate_outputs
-    exit 0
+    exit "$gate_rc"
 fi
 
 python3 "$ROOT_DIR/scripts/triage-host-fuzz-results.py" \
@@ -89,6 +96,8 @@ python3 "$ROOT_DIR/scripts/cross-layer-dedup.py" \
     "$OPENSBI_BUG_JSON" \
     --json-out "$HOST_OUT_ROOT/cross-layer.json" \
     > "$HOST_OUT_ROOT/cross-layer.stdout.json"
-run_quality_gate
+gate_rc=0
+run_quality_gate || gate_rc=$?
 
 validate_outputs
+exit "$gate_rc"

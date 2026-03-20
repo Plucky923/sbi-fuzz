@@ -35,7 +35,64 @@ assert finding_sets["regressed_bug_ids"] == ["bug-b"], finding_sets
 assert finding_sets["new_bug_ids"] == [], finding_sets
 PY
 
-rg -n '"finding_sets"' "$repo_root/scripts/run-sbi-fuzz-campaign.py" >/dev/null
-rg -n '"finding_sets"' "$repo_root/scripts/run-sequence-campaign.py" >/dev/null
+tmp_dir="$(mktemp -d)"
+trap 'rm -rf "$tmp_dir"' EXIT
+
+prev_firmware_summary="$tmp_dir/prev-firmware-summary.json"
+cat > "$prev_firmware_summary" <<'JSON'
+{
+  "finding_sets": {
+    "current_bug_ids": ["bug-prev"],
+    "fixed_bug_ids": ["bug-regressed"]
+  }
+}
+JSON
+
+target_bin="$tmp_dir/target.bin"
+injector_elf="$tmp_dir/injector.elf"
+seed_dir="$tmp_dir/seeds"
+result_dir="$tmp_dir/results"
+summary_json="$tmp_dir/summary.json"
+mkdir -p "$seed_dir" "$result_dir"
+: > "$target_bin"
+: > "$injector_elf"
+
+python3 "$repo_root/scripts/run-sbi-fuzz-campaign.py" \
+  smoke-profile \
+  "$target_bin" \
+  "$injector_elf" \
+  "$seed_dir" \
+  "$result_dir" \
+  --profile single-hart-fast \
+  --fuzzer-bin /bin/true \
+  --helper-bin /bin/true \
+  --previous-summary "$prev_firmware_summary" \
+  --json-out "$summary_json" >/dev/null
+
+rg -n '"finding_sets":' "$summary_json" >/dev/null
+rg -n '"fixed_bug_ids": \[' "$summary_json" >/dev/null
+
+prev_sequence_summary="$tmp_dir/prev-sequence-summary.json"
+cat > "$prev_sequence_summary" <<JSON
+{
+  "artifacts": {
+    "bug_json": "$repo_root/tests/fixtures/workflow/sequence-bugs-previous.json"
+  }
+}
+JSON
+
+sequence_dir="$tmp_dir/sequences"
+mkdir -p "$sequence_dir"
+summary_sequence_json="$tmp_dir/sequence-summary.json"
+python3 "$repo_root/scripts/run-sequence-campaign.py" \
+  smoke-sequence \
+  opensbi \
+  "$sequence_dir" \
+  --profile host-sequence \
+  --helper-bin /bin/true \
+  --previous-summary "$prev_sequence_summary" \
+  --json-out "$summary_sequence_json" >/dev/null
+
+rg -n '"finding_sets":' "$summary_sequence_json" >/dev/null
 
 echo "campaign summary delta test passed"

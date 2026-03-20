@@ -168,10 +168,14 @@ sequence-seeds:
 	@cargo run -q -p helper -- generate-sequence-seeds --target-kind both ./output/sequence
 
 campaign-sequence-opensbi: sequence-seeds
-	@python3 ./scripts/run-sequence-campaign.py opensbi-sequence opensbi ./output/sequence --json-out ./output/sequence/opensbi-sequence.campaign.json
+	@PREV_SUMMARY=""; \
+	if [ -f ./output/sequence/opensbi-sequence.campaign.json ]; then PREV_SUMMARY="--previous-summary ./output/sequence/opensbi-sequence.campaign.json"; fi; \
+	python3 ./scripts/run-sequence-campaign.py opensbi-sequence opensbi ./output/sequence $$PREV_SUMMARY --json-out ./output/sequence/opensbi-sequence.campaign.json
 
 campaign-sequence-rustsbi: sequence-seeds
-	@python3 ./scripts/run-sequence-campaign.py rustsbi-sequence rustsbi ./output/sequence --json-out ./output/sequence/rustsbi-sequence.campaign.json
+	@PREV_SUMMARY=""; \
+	if [ -f ./output/sequence/rustsbi-sequence.campaign.json ]; then PREV_SUMMARY="--previous-summary ./output/sequence/rustsbi-sequence.campaign.json"; fi; \
+	python3 ./scripts/run-sequence-campaign.py rustsbi-sequence rustsbi ./output/sequence $$PREV_SUMMARY --json-out ./output/sequence/rustsbi-sequence.campaign.json
 
 campaign-opensbi:
 	@$(MAKE) -C playground/opensbi-fuzz campaign

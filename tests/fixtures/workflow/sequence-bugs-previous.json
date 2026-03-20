@@ -1,0 +1,35 @@
+{
+  "buckets": {
+    "mismatch|legacy-sequence-signature": {
+      "affected_target": "both",
+      "bug_id": "bug-sequence-previous",
+      "classification": "mismatch",
+      "count": 1,
+      "dedup_key": "both|mismatch|legacy-sequence-signature",
+      "eid": "0x48534D",
+      "expected": "Match",
+      "fid": "0x0",
+      "first_seen": "2026-03-19T00:00:00Z",
+      "impact": "spec_violation",
+      "input": "previous-sequence.seq",
+      "last_seen": "2026-03-19T00:00:00Z",
+      "repro_stability": {
+        "attempts": 1,
+        "label": "single_replay",
+        "stable_ratio": 1.0
+      }
+    }
+  },
+  "by_classification": {
+    "mismatch": 1
+  },
+  "by_signal": {},
+  "by_signature": {
+    "mismatch|legacy-sequence-signature": 1
+  },
+  "candidate_count": 1,
+  "generated_at_utc": "2026-03-19T00:00:00Z",
+  "report_type": "bug_report",
+  "schema_version": 1,
+  "total_results": 1
+}

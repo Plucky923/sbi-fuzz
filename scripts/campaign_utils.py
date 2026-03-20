@@ -128,7 +128,7 @@ def bug_ids_from_summary(summary: dict | None):
     return []
 
 
-def previous_bug_ids(summary: dict | None):
+def previous_bug_ids(summary: dict | None, summary_path: Path | None = None):
     if not summary:
         return set(), set()
     finding_sets = summary.get("finding_sets") if isinstance(summary.get("finding_sets"), dict) else {}
@@ -143,8 +143,14 @@ def previous_bug_ids(summary: dict | None):
                 bucket.get("bug_id") or key
                 for key, bucket in summary["confirmed_bug_like_buckets"].items()
             ]
-        elif isinstance(summary.get("bug_signatures"), dict):
-            current_ids = list(summary["bug_signatures"].keys())
+        elif isinstance(summary.get("artifacts"), dict) and summary["artifacts"].get("bug_json"):
+            bug_json_path = Path(summary["artifacts"]["bug_json"])
+            if not bug_json_path.is_absolute() and summary_path:
+                bug_json_path = (summary_path.parent / bug_json_path).resolve()
+            if bug_json_path.exists():
+                current_ids = bug_ids_from_summary(json.loads(bug_json_path.read_text()))
+            else:
+                current_ids = []
         else:
             current_ids = []
 
@@ -154,9 +160,9 @@ def previous_bug_ids(summary: dict | None):
     return set(current_ids), set(fixed_ids)
 
 
-def compute_finding_sets(current_bug_ids: list[str], previous_summary: dict | None):
+def compute_finding_sets(current_bug_ids: list[str], previous_summary: dict | None, previous_summary_path: Path | None = None):
     current = set(current_bug_ids)
-    previous_current, previous_fixed = previous_bug_ids(previous_summary)
+    previous_current, previous_fixed = previous_bug_ids(previous_summary, previous_summary_path)
     regressed = current & previous_fixed
     persisting = current & previous_current
     new = current - previous_current - regressed

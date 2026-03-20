@@ -419,7 +419,11 @@ def main() -> int:
         if args.previous_summary and args.previous_summary.exists()
         else None
     )
-    finding_sets = compute_finding_sets(bug_ids_from_summary(bugs), previous_summary)
+    finding_sets = compute_finding_sets(
+        bug_ids_from_summary(bugs),
+        previous_summary,
+        args.previous_summary,
+    )
 
     summary = {
         "name": args.name,
