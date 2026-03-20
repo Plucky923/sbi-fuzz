@@ -1,12 +1,46 @@
+#[cfg(feature = "host-opensbi")]
 mod opensbi;
-mod rustsbi;
+#[cfg(not(feature = "host-opensbi"))]
+mod opensbi {
+    use crate::FdtSeedVariant;
+    use common::{HostHarnessInput, HostHarnessReport};
 
-use common::{HostHarnessInput, HostTargetKind};
+    pub(crate) fn run(_input: &HostHarnessInput) -> Result<HostHarnessReport, String> {
+        Err(crate::backend_disabled("OpenSBI", "host-opensbi"))
+    }
+
+    pub(crate) fn seed_fdt_blob(_variant: FdtSeedVariant) -> Result<Vec<u8>, String> {
+        Err(crate::backend_disabled("OpenSBI", "host-opensbi"))
+    }
+}
+
+#[cfg(feature = "host-rustsbi")]
+mod rustsbi;
+#[cfg(not(feature = "host-rustsbi"))]
+mod rustsbi {
+    use crate::FdtSeedVariant;
+    use common::{HostHarnessInput, HostHarnessReport};
+
+    pub(crate) fn run(_input: &HostHarnessInput) -> Result<HostHarnessReport, String> {
+        Err(crate::backend_disabled("RustSBI", "host-rustsbi"))
+    }
+
+    pub(crate) fn seed_fdt_blob(_variant: FdtSeedVariant) -> Result<Vec<u8>, String> {
+        Err(crate::backend_disabled("RustSBI", "host-rustsbi"))
+    }
+}
+
 pub use common::{
     HostEcallReport, HostFdtDetails, HostFdtReport, HostHarnessReport, HostHarnessResult,
 };
+use common::{HostHarnessInput, HostTargetKind};
 
 pub const FDT_SEED_BUFFER_CAPACITY: usize = 4096;
+
+#[cfg(any(not(feature = "host-opensbi"), not(feature = "host-rustsbi")))]
+fn backend_disabled(name: &str, feature: &str) -> String {
+    format!("{name} host backend not built; enable the `{feature}` feature")
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FdtSeedVariant {
@@ -43,20 +77,21 @@ mod tests {
         HostPlatformFaultProfile, HostPrivilegeState, SbiError,
     };
 
+    #[cfg(feature = "host-opensbi")]
     const OPEN_FDT_OOB_REPRO_BLOB: &[u8] = &[
-        208, 13, 254, 237, 0, 0, 3, 7, 0, 0, 0, 56, 0, 0, 2, 184, 0, 0, 0, 40, 0, 0, 0, 17,
-        0, 0, 0, 16, 0, 0, 0, 0, 0, 0, 0, 79, 0, 0, 2, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 18, 0, 0, 0, 33, 114, 105,
-        115, 99, 118, 45, 118, 105, 114, 116, 105, 111, 44, 113, 101, 109, 117, 0, 0, 2, 0, 0,
-        0, 3, 0, 0, 0, 18, 0, 0, 0, 27, 114, 117, 115, 116, 115, 98, 105, 44, 113, 101, 109,
-        117, 45, 118, 105, 114, 116, 0, 0, 2, 0, 0, 0, 3, 0, 0, 0, 4, 0, 0, 0, 15, 0, 0, 0, 2,
-        0, 0, 0, 3, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 1, 99, 104, 111, 115, 101,
-        110, 0, 0, 0, 0, 0, 3, 0, 0, 0, 21, 0, 0, 0, 67, 47, 115, 111, 99, 47, 115, 101, 114,
-        105, 97, 108, 64, 49, 48, 48, 48, 48, 48, 48, 48, 0, 0, 0, 15, 0, 0, 0, 2, 0, 0, 0, 1,
-        115, 111, 99, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 60, 0, 0, 0, 3, 0, 0, 0, 4, 0, 0,
-        0, 15, 0, 0, 0, 2, 0, 0, 0, 3, 0, 0, 0, 4,
+        208, 13, 254, 237, 0, 0, 3, 7, 0, 0, 0, 56, 0, 0, 2, 184, 0, 0, 0, 40, 0, 0, 0, 17, 0, 0,
+        0, 16, 0, 0, 0, 0, 0, 0, 0, 79, 0, 0, 2, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 18, 0, 0, 0, 33, 114, 105, 115, 99, 118, 45,
+        118, 105, 114, 116, 105, 111, 44, 113, 101, 109, 117, 0, 0, 2, 0, 0, 0, 3, 0, 0, 0, 18, 0,
+        0, 0, 27, 114, 117, 115, 116, 115, 98, 105, 44, 113, 101, 109, 117, 45, 118, 105, 114, 116,
+        0, 0, 2, 0, 0, 0, 3, 0, 0, 0, 4, 0, 0, 0, 15, 0, 0, 0, 2, 0, 0, 0, 3, 0, 0, 0, 4, 0, 0, 0,
+        0, 0, 0, 0, 2, 0, 0, 0, 1, 99, 104, 111, 115, 101, 110, 0, 0, 0, 0, 0, 3, 0, 0, 0, 21, 0,
+        0, 0, 67, 47, 115, 111, 99, 47, 115, 101, 114, 105, 97, 108, 64, 49, 48, 48, 48, 48, 48,
+        48, 48, 0, 0, 0, 15, 0, 0, 0, 2, 0, 0, 0, 1, 115, 111, 99, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0,
+        0, 60, 0, 0, 0, 3, 0, 0, 0, 4, 0, 0, 0, 15, 0, 0, 0, 2, 0, 0, 0, 3, 0, 0, 0, 4,
     ];
 
+    #[cfg(feature = "host-opensbi")]
     #[test]
     fn opensbi_base_get_spec_version_runs() {
         let input = HostHarnessInput {
@@ -84,6 +119,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "host-opensbi")]
     #[test]
     fn opensbi_platform_fault_raw_error_is_sanitized() {
         let input = HostHarnessInput {
@@ -108,6 +144,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "host-rustsbi")]
     #[test]
     fn rustsbi_base_get_spec_version_runs() {
         let input = HostHarnessInput {
@@ -136,6 +173,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "host-rustsbi")]
     #[test]
     fn rustsbi_platform_fault_raw_error_is_preserved() {
         let input = HostHarnessInput {
@@ -161,6 +199,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "host-rustsbi")]
     #[test]
     fn rustsbi_console_duplicate_side_effects_are_visible() {
         let input = HostHarnessInput {
@@ -198,6 +237,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "host-rustsbi")]
     #[test]
     fn rustsbi_console_read_updates_post_memory_snapshot() {
         let input = HostHarnessInput {
@@ -234,6 +274,7 @@ mod tests {
         assert_eq!(report.post_memory_regions[0].bytes, b"RRRR");
     }
 
+    #[cfg(feature = "host-opensbi")]
     #[test]
     fn opensbi_hsm_suspend_rejects_invalid_suspend_type() {
         let input = HostHarnessInput {
@@ -258,6 +299,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "host-opensbi")]
     #[test]
     fn opensbi_pmu_counter_get_info_rejects_out_of_range_counter() {
         let input = HostHarnessInput {
@@ -282,6 +324,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "host-opensbi")]
     #[test]
     fn opensbi_hsm_status_rejects_invalid_hart() {
         let input = HostHarnessInput {
@@ -306,6 +349,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "host-opensbi")]
     #[test]
     fn opensbi_minimal_fdt_seed_parses() {
         let blob =
@@ -334,6 +378,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "host-opensbi")]
     #[test]
     fn opensbi_truncated_fdt_is_reported_as_error() {
         let mut blob =
@@ -363,6 +408,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "host-opensbi")]
     #[test]
     fn opensbi_known_fdt_oob_reproducer_is_now_reported_as_fdt_error() {
         let input = HostHarnessInput {
@@ -389,6 +435,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "host-rustsbi")]
     #[test]
     fn rustsbi_bad_stdout_path_is_partial_config() {
         let blob = seed_fdt_blob(HostTargetKind::RustSbi, FdtSeedVariant::BadStdoutPath)
@@ -425,6 +472,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "host-rustsbi")]
     #[test]
     fn rustsbi_minimal_fdt_seed_parses() {
         let blob = seed_fdt_blob(HostTargetKind::RustSbi, FdtSeedVariant::Minimal)
@@ -461,6 +509,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "host-rustsbi")]
     #[test]
     fn rustsbi_hsm_status_rejects_invalid_hart() {
         let input = HostHarnessInput {

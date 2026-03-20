@@ -3,6 +3,11 @@ name = "host_harness"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = ["host-opensbi", "host-rustsbi"]
+host-opensbi = []
+host-rustsbi = []
+
 [dependencies]
 common = { path = "../common" }
 serde = { version = "1.0.218", features = ["derive"] }

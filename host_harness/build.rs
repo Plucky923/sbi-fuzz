@@ -27,8 +27,13 @@ fn opensbi_root(manifest_dir: &Path) -> PathBuf {
 }
 
 fn main() {
+    println!("cargo:rerun-if-env-changed=CARGO_FEATURE_HOST_OPENSBI");
     println!("cargo:rerun-if-env-changed=SBIFUZZ_OPENSBI_ROOT");
     println!("cargo:rerun-if-env-changed=SBIFUZZ_HOST_C_SANITIZERS");
+    if env::var_os("CARGO_FEATURE_HOST_OPENSBI").is_none() {
+        return;
+    }
+
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("manifest dir"));
     let opensbi = opensbi_root(&manifest_dir);
     let native_dir = manifest_dir.join("src/native");
@@ -73,10 +78,6 @@ fn main() {
     );
     println!(
         "cargo:rerun-if-changed={}",
-        native_dir.join("rustsbi_fdt_shim.c").display()
-    );
-    println!(
-        "cargo:rerun-if-changed={}",
         native_include.join("sbi/riscv_asm.h").display()
     );
 
@@ -86,7 +87,6 @@ fn main() {
         .include(&opensbi_include)
         .include(&libfdt_dir)
         .file(native_dir.join("opensbi_host_shim.c"))
-        .file(native_dir.join("rustsbi_fdt_shim.c"))
         .define("__riscv_xlen", "64")
         .define("OPENSBI_VERSION_MAJOR", "1")
         .define("OPENSBI_VERSION_MINOR", "6")

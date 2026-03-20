@@ -6,12 +6,15 @@ sbifuzz is a fuzzing framework designed to test RISC-V SBI (Supervisor Binary In
 
 ```
 sbifuzz/
-├── common/          # Common libraries and utility functions
-├── fuzzer/          # Core fuzzing logic
-├── helper/          # Helper tools (seed generation, runners, etc.)
-├── injector/        # Injector implementations
-├── playground/      # Examples and test cases
-└── Dockerfile.dev   # Development environment Dockerfile
+├── common/                 # Shared wire formats, schema registry, oracle helpers
+├── host_harness/           # Host-side OpenSBI/RustSBI harness and cargo-fuzz targets
+├── helper/                 # CLI for seed generation, replay, sequence runs, triage helpers
+├── config/                 # Locked doc revisions, schemas, campaign profiles
+├── scripts/                # Campaign, triage, metrics, and regression automation
+├── playground/             # System-level OpenSBI/RustSBI/QEMU entry points
+├── fuzzer/                 # QEMU/system-level fuzzing loop
+├── injector/               # Injector implementations
+└── Dockerfile.dev          # Development environment Dockerfile
 ```
 
 ## Key Features
@@ -25,7 +28,25 @@ sbifuzz/
 
 ## Quick Start
 
-To get started with fuzzing RustSBI:
+Recommended flow:
+
+1. Start with the host-side harness for fast validation and replay.
+2. Escalate to the QEMU/system-level playgrounds only after the host-side path is healthy.
+
+For a fresh machine that does not have an OpenSBI source tree prepared yet, validate the RustSBI-only host path first:
+
+```bash
+cargo test -p common -p host_harness --no-default-features --features host-rustsbi
+```
+
+To enable the full host-side harness with both RustSBI and OpenSBI backends:
+
+```bash
+make -C playground/opensbi-fuzz prepare
+make test-host-harness
+```
+
+To move up to the system-level RustSBI playground:
 
 ```bash
 cd playground/rustsbi-fuzz
@@ -144,6 +165,14 @@ To launch the long-running 60-worker RustSBI host-side campaign after the smokes
 
 ```bash
 make host-fuzz-60
+```
+
+To summarize a host-side campaign and enforce a minimum quality bar:
+
+```bash
+make triage-host-fuzz
+make collect-metrics
+make quality-gate
 ```
 
 For the more complex multi-hart host-side sequence campaign, use:

@@ -10,9 +10,14 @@ cargo-fuzz = true
 [workspace]
 members = ["."]
 
+[features]
+default = ["host-opensbi", "host-rustsbi"]
+host-opensbi = ["host_harness/host-opensbi"]
+host-rustsbi = ["host_harness/host-rustsbi"]
+
 [dependencies]
 common = { path = "../../common" }
-host_harness = { path = ".." }
+host_harness = { path = "..", default-features = false }
 libfuzzer-sys = "0.4"
 rand = "0.8"
 
