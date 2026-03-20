@@ -181,6 +181,23 @@ def bug_id_from_bucket(summary: dict | None, key: str, bucket: dict):
         return str(bucket["bug_id"])
     dedup_key = bucket.get("dedup_key")
     if not dedup_key:
+        if (
+            summary
+            and summary.get("report_type") == "host_triage"
+            and "|" in str(key)
+            and str(key).count("|") >= 4
+        ):
+            target, eid, fid, classification, detail = str(key).split("|", 4)
+            dedup_key = "|".join(
+                [
+                    target,
+                    str(int(str(eid), 0)),
+                    str(int(str(fid), 0)),
+                    classification,
+                    detail,
+                ]
+            )
+            return f"bug-{hashlib.sha256(dedup_key.encode()).hexdigest()[:12]}"
         affected_target = bucket.get("affected_target") or bucket.get("target_kind")
         if not affected_target:
             affected_target = normalize_summary_target(summary)
