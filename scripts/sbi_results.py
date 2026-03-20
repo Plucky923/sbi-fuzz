@@ -189,6 +189,10 @@ def utc_now() -> str:
 
 def normalize_affected_target(value: str | None) -> str:
     normalized = (value or "unknown").strip().lower()
+    if "opensbi" in normalized or "open_sbi" in normalized or "open-sbi" in normalized:
+        return "opensbi"
+    if "rustsbi" in normalized or "rust_sbi" in normalized or "rust-sbi" in normalized:
+        return "rustsbi"
     if normalized in {"open_sbi", "opensbi", "open-sbi"}:
         return "opensbi"
     if normalized in {"rust_sbi", "rustsbi", "rust-sbi"}:
