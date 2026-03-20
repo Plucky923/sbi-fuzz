@@ -18,6 +18,12 @@ make preflight
 
 This checks the environment, validates repository docs, and runs deterministic tests before fuzzing.
 
+Success criteria:
+
+- `make preflight` exits with status `0`
+- docs validation passes
+- deterministic regression targets pass
+
 ## S0: Quick Regression
 
 Use S0 before opening a PR or after touching the harness, replay scripts, or report pipeline.
@@ -33,13 +39,33 @@ Expected outputs:
 - `output/host_fuzz/triage.json`
 - `output/host_fuzz/triage.md`
 - `output/host_fuzz/metrics.json`
+- `output/host_fuzz/opensbi.bugs.json`
+- `output/host_fuzz/opensbi.bugs.md`
+- `output/host_fuzz/cross-layer.json`
 - `output/host_fuzz/quality_gate.json`
+
+Success criteria:
+
+- `make smoke-all` exits with status `0`
+- smoke logs exist for `fuzz_ecall_opensbi`, `fuzz_ecall_rustsbi`, `fuzz_sequence_both`, `fuzz_diff_ecall`, and `fuzz_diff_sequence`
+- `make report-all` exits with status `0`
+- the generated `triage.json`, `opensbi.bugs.json`, `cross-layer.json`, and `quality_gate.json` all pass schema validation
 
 Escalation:
 
 - If `make smoke-all` fails before fuzzing starts, fix the local environment or deterministic tests first.
 - If `make smoke-all` reports a finding and writes an artifact, treat that as an infrastructure success and continue to reporting.
 - If `make report-all` fails validation, inspect the generated JSON schema before running longer campaigns.
+
+Deterministic review mode:
+
+```bash
+SBIFUZZ_USE_FIXTURES=1 make preflight
+SBIFUZZ_USE_FIXTURES=1 make smoke-all
+SBIFUZZ_USE_FIXTURES=1 make report-all
+```
+
+Use this when the full host fuzz and OpenSBI toolchain is unavailable but you still need to verify the documented orchestration and artifact contract end to end.
 
 ## S1: Single-Implementation Host Fuzzing
 
@@ -133,6 +159,8 @@ Escalation:
 - Host fuzz logs: `output/host_fuzz/logs/`
 - Host triage outputs: `output/host_fuzz/triage.json`, `output/host_fuzz/triage.md`
 - Host metrics: `output/host_fuzz/metrics.json`
+- OpenSBI bug report mirror: `output/host_fuzz/opensbi.bugs.json`, `output/host_fuzz/opensbi.bugs.md`
+- Cross-layer dedup output: `output/host_fuzz/cross-layer.json`
 - Host gate result: `output/host_fuzz/quality_gate.json`
 - OpenSBI campaign summary: `playground/opensbi-fuzz/output/campaign/latest.json`
 - RustSBI campaign summary: `playground/rustsbi-fuzz/output/campaign/latest.json`

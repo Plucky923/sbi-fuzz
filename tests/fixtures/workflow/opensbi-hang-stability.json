@@ -1,0 +1,15 @@
+{
+  "attempts_per_case": 3,
+  "cases_by_hash": {
+    "fixturecccc3333": {
+      "attempts": 3,
+      "hang_count": 3,
+      "label": "stable_hang",
+      "stable_ratio": 1.0
+    }
+  },
+  "flaky_hang_cases": 0,
+  "non_hang_cases": 0,
+  "stable_hang_cases": 1,
+  "total_cases": 1
+}

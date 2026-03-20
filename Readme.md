@@ -165,6 +165,16 @@ make report-all
 
 The scenario-to-command mapping and expected artifact paths are documented in `docs/runbook.md`.
 
+For deterministic workflow validation in review or CI environments that do not have the full host fuzz and playground toolchain available, use:
+
+```bash
+SBIFUZZ_USE_FIXTURES=1 make preflight
+SBIFUZZ_USE_FIXTURES=1 make smoke-all
+SBIFUZZ_USE_FIXTURES=1 make report-all
+```
+
+This fixture mode exercises the same top-level orchestration and validates the generated artifact contract without requiring a live long-running fuzz campaign.
+
 This smoke run performs three checks in order:
 
 1. an intentional `fuzz_harness_smoke` crash to verify the libFuzzer crash/artifact pipeline;

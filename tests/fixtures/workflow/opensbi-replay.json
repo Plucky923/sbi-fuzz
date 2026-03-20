@@ -1,0 +1,38 @@
+{
+  "results": [
+    {
+      "actual": "Crash",
+      "classification": "sanitizer",
+      "expected": "Timeout",
+      "extension": "pmu",
+      "fid": "0x2",
+      "hash": "fixtureaaaa1111",
+      "input": "fixture-case-a.exec",
+      "interesting": true,
+      "notes": [],
+      "output_excerpt": "KASAN: heap-buffer-overflow",
+      "eid": "0x504D55",
+      "signals": [
+        "kasan"
+      ],
+      "signature": "signals:kasan",
+      "trap": null
+    },
+    {
+      "actual": "Timeout",
+      "classification": "hang",
+      "expected": "Timeout",
+      "extension": "console",
+      "fid": "0x0",
+      "hash": "fixturecccc3333",
+      "input": "fixture-case-c.exec",
+      "interesting": true,
+      "notes": [],
+      "output_excerpt": "Run finish. Exit kind: Timeout",
+      "eid": "0x4442434E",
+      "signals": [],
+      "signature": "exit:Timeout",
+      "trap": null
+    }
+  ]
+}

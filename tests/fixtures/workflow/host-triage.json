@@ -1,0 +1,71 @@
+{
+  "by_target": {
+    "rustsbi": 2
+  },
+  "by_violation_type": {
+    "hang": 1,
+    "spec_violation": 1
+  },
+  "buckets": {
+    "rustsbi|1852990825|3|hang|semantic:hart1:raw->hsm_hart_suspend": {
+      "affected_target": "rustsbi",
+      "bug_id": "bug-fixture-host-hang",
+      "classification": "hang",
+      "count": 1,
+      "dedup_key": "rustsbi|1852990825|3|hang|semantic:hart1:raw->hsm_hart_suspend",
+      "eid": 1213488973,
+      "fid": 3,
+      "first_seen": "2026-03-20T00:00:00Z",
+      "hashes": [
+        "fixturehang01"
+      ],
+      "impact": "hang",
+      "last_seen": "2026-03-20T00:00:00Z",
+      "reproducer": "tests/regression/sequence/shared_base_hsm_status.json",
+      "repro_stability": {
+        "attempts": 1,
+        "label": "single_replay",
+        "stable_ratio": 1.0
+      },
+      "target_kind": "rustsbi",
+      "violation_detail": "semantic:hart1:raw->hsm_hart_suspend",
+      "violation_type": "hang"
+    },
+    "rustsbi|16|0|spec_violation|semantic:hart0:raw->base_get_spec_version": {
+      "affected_target": "rustsbi",
+      "bug_id": "bug-fixture-host-spec",
+      "classification": "spec_violation",
+      "count": 1,
+      "dedup_key": "rustsbi|16|0|spec_violation|semantic:hart0:raw->base_get_spec_version",
+      "eid": 16,
+      "fid": 0,
+      "first_seen": "2026-03-20T00:00:00Z",
+      "hashes": [
+        "fixturespec01"
+      ],
+      "impact": "spec_violation",
+      "last_seen": "2026-03-20T00:00:00Z",
+      "reproducer": "tests/regression/host/base_get_spec_version.json",
+      "repro_stability": {
+        "attempts": 1,
+        "label": "single_replay",
+        "stable_ratio": 1.0
+      },
+      "target_kind": "rustsbi",
+      "violation_detail": "semantic:hart0:raw->base_get_spec_version",
+      "violation_type": "spec_violation"
+    }
+  },
+  "generated_at_utc": "2026-03-20T00:00:00Z",
+  "report_type": "host_triage",
+  "results": [
+    {
+      "confirmed": true
+    },
+    {
+      "confirmed": true
+    }
+  ],
+  "schema_version": 1,
+  "total_cases": 2
+}

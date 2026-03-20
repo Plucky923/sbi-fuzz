@@ -91,12 +91,39 @@ def validate_quality_gate(data: dict) -> None:
         fail("quality gate report: warnings must be a list")
 
 
+def validate_cross_layer(data: dict) -> None:
+    require_keys(
+        data,
+        {"bugs", "generated_at_utc", "report_type", "schema_version", "total_unique"},
+        "cross-layer report",
+    )
+    if data["report_type"] != "cross_layer_dedup":
+        fail("cross-layer report: report_type must be `cross_layer_dedup`")
+    if not isinstance(data["bugs"], dict):
+        fail("cross-layer report: bugs must be an object")
+    for key, bug in data["bugs"].items():
+        require_keys(
+            bug,
+            {
+                "affected_target",
+                "bug_id",
+                "classification",
+                "dedup_key",
+                "impact",
+                "reproducers",
+            },
+            f"cross-layer bug `{key}`",
+        )
+        if not isinstance(bug["reproducers"], list):
+            fail(f"cross-layer bug `{key}`: reproducers must be a list")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Validate generated report artifacts")
     parser.add_argument("input", type=Path)
     parser.add_argument(
         "--kind",
-        choices=["bug-report", "host-triage", "quality-gate"],
+        choices=["bug-report", "cross-layer", "host-triage", "quality-gate"],
         required=True,
     )
     args = parser.parse_args()
@@ -104,6 +131,7 @@ def main() -> int:
     data = json.loads(args.input.read_text())
     validators = {
         "bug-report": validate_bug_report,
+        "cross-layer": validate_cross_layer,
         "host-triage": validate_host_triage,
         "quality-gate": validate_quality_gate,
     }

@@ -1,0 +1,34 @@
+{
+  "cases": [
+    {
+      "hash": "fixturecccc3333",
+      "input": "fixture-case-c.exec",
+      "minimized_call_count": 1,
+      "minimized_instruction_count": 2,
+      "original_call_count": 3,
+      "original_instruction_count": 5,
+      "output": "fixture-case-c.min.exec",
+      "semantic_signature": "hart1:raw->base_get_impl_id",
+      "status": "minimized"
+    }
+  ],
+  "cases_by_hash": {
+    "fixturecccc3333": {
+      "hash": "fixturecccc3333",
+      "input": "fixture-case-c.exec",
+      "minimized_call_count": 1,
+      "minimized_instruction_count": 2,
+      "original_call_count": 3,
+      "original_instruction_count": 5,
+      "output": "fixture-case-c.min.exec",
+      "semantic_signature": "hart1:raw->base_get_impl_id",
+      "status": "minimized"
+    }
+  },
+  "failed_cases": 0,
+  "minimized_cases": 1,
+  "reduced_cases": 1,
+  "successful_cases": 1,
+  "total_cases": 1,
+  "unique_semantic_signatures": 1
+}
