@@ -72,6 +72,21 @@ python3 "$repo_root/scripts/run-sbi-fuzz-campaign.py" \
 rg -n '"finding_sets":' "$summary_json" >/dev/null
 rg -n '"fixed_bug_ids": \[' "$summary_json" >/dev/null
 
+bad_previous_summary="$tmp_dir/bad-prev-firmware-summary.json"
+printf '{bad json\n' > "$bad_previous_summary"
+python3 "$repo_root/scripts/run-sbi-fuzz-campaign.py" \
+  smoke-profile \
+  "$target_bin" \
+  "$injector_elf" \
+  "$seed_dir" \
+  "$result_dir" \
+  --profile single-hart-fast \
+  --fuzzer-bin /bin/true \
+  --helper-bin /bin/true \
+  --previous-summary "$bad_previous_summary" \
+  --json-out "$tmp_dir/bad-summary.json" >/dev/null
+rg -n '"finding_sets":' "$tmp_dir/bad-summary.json" >/dev/null
+
 prev_sequence_summary="$tmp_dir/prev-sequence-summary.json"
 cat > "$prev_sequence_summary" <<JSON
 {

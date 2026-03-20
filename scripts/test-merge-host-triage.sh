@@ -49,6 +49,7 @@ JSON
 json_out="$out_dir/merged.json"
 python3 "$repo_root/scripts/merge-host-triage.py" "$input_json" --json-out "$json_out" >/dev/null
 rg -n '"impact": "crash"' "$json_out" >/dev/null
+rg -n '"confirmed": true' "$json_out" >/dev/null
 rg -n '"count": 3' "$json_out" >/dev/null
 rg -n '"total_cases": 3' "$json_out" >/dev/null
 

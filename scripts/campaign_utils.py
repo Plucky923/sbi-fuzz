@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import json
+import sys
 import subprocess
 import time
 import tomllib
@@ -117,6 +118,19 @@ def path_metadata(path: Path):
 
 def write_json(path: Path, payload: dict):
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+
+
+def load_optional_json(path: Path | None):
+    if not path or not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text())
+    except json.JSONDecodeError as exc:
+        print(
+            f"warning: ignoring malformed JSON at {path}: {exc}",
+            file=sys.stderr,
+        )
+        return None
 
 
 def bug_ids_from_summary(summary: dict | None):

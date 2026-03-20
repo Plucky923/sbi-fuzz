@@ -145,7 +145,11 @@ def main() -> int:
                         "path": bucket.get("reproducer"),
                         "reproducer": bucket.get("reproducer"),
                         "impact": bucket.get("impact"),
-                        "confirmed": bucket.get("impact") == "crash",
+                        "confirmed": bool(
+                            bucket.get("confirmed")
+                            or bucket.get("classification") in {"sanitizer", "crash"}
+                            or bucket.get("violation_type") in {"spec_violation", "memory_violation"}
+                        ),
                     }
                 )
 

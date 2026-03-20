@@ -11,6 +11,7 @@ from campaign_utils import (
     bug_ids_from_summary,
     collect_repo_metadata,
     compute_finding_sets,
+    load_optional_json,
     load_profile,
     path_metadata,
     prepare_env,
@@ -414,11 +415,7 @@ def main() -> int:
         stdout_path=campaign_dir / "bugs.stdout.json",
     )
     bugs = json.loads(bug_json.read_text())
-    previous_summary = (
-        json.loads(args.previous_summary.read_text())
-        if args.previous_summary and args.previous_summary.exists()
-        else None
-    )
+    previous_summary = load_optional_json(args.previous_summary)
     finding_sets = compute_finding_sets(
         bug_ids_from_summary(bugs),
         previous_summary,
