@@ -17,8 +17,8 @@ cat > "$host_json" <<'JSON'
       "bug_id": "bug-host",
       "classification": "crash",
       "dedup_key": "rustsbi|crash|semantic:same-root-cause",
-      "eid": "0x10",
-      "fid": "0x0",
+      "eid": 16,
+      "fid": 0,
       "first_seen": "2026-03-20T00:00:00Z",
       "impact": "crash",
       "last_seen": "2026-03-20T00:00:00Z",
@@ -85,15 +85,28 @@ JSON
 json_out="$out_dir/cross-layer.json"
 python3 "$repo_root/scripts/cross-layer-dedup.py" "$host_json" "$bug_json" --json-out "$json_out" > "$out_dir/stdout.json"
 
-rg -n '"schema_version": 1' "$json_out" >/dev/null
-rg -n '"report_type": "cross_layer_dedup"' "$json_out" >/dev/null
-rg -n '"total_unique": 2' "$json_out" >/dev/null
-rg -n '"affected_target": "rustsbi"' "$json_out" >/dev/null
-rg -n '"sources": \[' "$json_out" >/dev/null
-rg -n '"host-triage"' "$json_out" >/dev/null
-rg -n '"bugs"' "$json_out" >/dev/null
-rg -n '"system-case.exec"' "$json_out" >/dev/null
-rg -n '"host-case.host"' "$json_out" >/dev/null
+python3 - "$json_out" <<'PY'
+import json
+import sys
+
+data = json.load(open(sys.argv[1], "r", encoding="utf-8"))
+assert data["schema_version"] == 1, data
+assert data["report_type"] == "cross_layer_dedup", data
+assert data["total_unique"] == 2, data
+
+rustsbi_bug = None
+for bug in data["bugs"].values():
+    if bug["affected_target"] == "rustsbi":
+        rustsbi_bug = bug
+        break
+
+assert rustsbi_bug is not None, data
+assert rustsbi_bug["count"] == 2, rustsbi_bug
+assert sorted(rustsbi_bug["sources"]) == ["bugs", "host-triage"], rustsbi_bug
+assert "host-case.host" in rustsbi_bug["reproducers"], rustsbi_bug
+assert "system-case.exec" in rustsbi_bug["reproducers"], rustsbi_bug
+assert rustsbi_bug["bug_id"] not in {"bug-host", "bug-system"}, rustsbi_bug
+PY
 
 single_json="$out_dir/cross-layer-single.json"
 python3 "$repo_root/scripts/cross-layer-dedup.py" "$host_json" --json-out "$single_json" > "$out_dir/stdout-single.json"

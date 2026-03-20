@@ -22,6 +22,18 @@ def normalize_target(value: str | None) -> str:
     return normalized or "unknown"
 
 
+def normalize_numeric(value) -> str:
+    if value is None:
+        return "0"
+    if isinstance(value, int):
+        return str(value)
+    text = str(value).strip()
+    try:
+        return str(int(text, 0))
+    except ValueError:
+        return text or "0"
+
+
 def impact_for_item(item: dict) -> str:
     if item.get("impact"):
         return item["impact"]
@@ -35,10 +47,24 @@ def impact_for_item(item: dict) -> str:
     return classification or "unknown"
 
 
-def dedup_key_for_item(source: str, item: dict) -> str:
+def dedup_key_for_item(source: str, item: dict, report_type: str | None = None) -> str:
+    if item.get("dedup_key"):
+        dedup_key = str(item["dedup_key"])
+        if report_type == "host_triage" and dedup_key.count("|") >= 4:
+            target, eid, fid, classification, detail = dedup_key.split("|", 4)
+            return "|".join(
+                [
+                    target,
+                    normalize_numeric(eid),
+                    normalize_numeric(fid),
+                    classification,
+                    detail,
+                ]
+            )
+        return dedup_key
     target = normalize_target(item.get("affected_target") or item.get("target_kind") or item.get("impl_kind") or source)
-    eid = item.get("eid", 0)
-    fid = item.get("fid", 0)
+    eid = normalize_numeric(item.get("eid", 0))
+    fid = normalize_numeric(item.get("fid", 0))
     classification = item.get("classification") or item.get("violation_type") or item.get("violation") or "unknown"
     detail = item.get("violation_detail") or item.get("raw_signature") or item.get("signature") or "none"
     return f"{target}|{eid}|{fid}|{classification}|{detail}"
@@ -49,6 +75,7 @@ def bug_id_for_key(dedup_key: str) -> str:
 
 
 def extract_source_items(source: str, data: dict) -> list[dict]:
+    report_type = data.get("report_type")
     if isinstance(data.get("buckets"), dict):
         items = list(data["buckets"].values())
     elif isinstance(data.get("bugs"), dict):
@@ -60,7 +87,7 @@ def extract_source_items(source: str, data: dict) -> list[dict]:
 
     normalized_items = []
     for item in items:
-        dedup_key = dedup_key_for_item(source, item)
+        dedup_key = dedup_key_for_item(source, item, report_type)
         reproducer = item.get("reproducer") or item.get("input")
         reproducer_list = item.get("reproducers") or ([reproducer] if reproducer else [])
         affected_target = normalize_target(
@@ -74,8 +101,8 @@ def extract_source_items(source: str, data: dict) -> list[dict]:
                 "affected_target": affected_target,
                 "classification": item.get("classification") or item.get("violation_type") or item.get("violation"),
                 "impact": impact_for_item(item),
-                "eid": item.get("eid", 0),
-                "fid": item.get("fid", 0),
+                "eid": normalize_numeric(item.get("eid", 0)),
+                "fid": normalize_numeric(item.get("fid", 0)),
                 "first_seen": item.get("first_seen"),
                 "last_seen": item.get("last_seen"),
                 "reproducers": reproducer_list,
@@ -103,7 +130,7 @@ def main() -> int:
         "total_unique": len(grouped),
         "bugs": {
             dedup_key: {
-                "bug_id": items[0]["bug_id"],
+                "bug_id": bug_id_for_key(dedup_key),
                 "dedup_key": dedup_key,
                 "count": len(items),
                 "sources": sorted({item["source"] for item in items}),
