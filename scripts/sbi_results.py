@@ -1319,7 +1319,9 @@ def report_bugs_cli(default_label: str = "SBI") -> int:
     hang_minimize = (
         json.loads(args.hang_minimize.read_text()) if args.hang_minimize else None
     )
-    target_hint = data.get("target_kind") or args.label
+    target_hint = data.get("target_kind")
+    if normalize_affected_target(target_hint) == "unknown":
+        target_hint = args.label
     summary = summarize_bug_report(results, hang_stability, hang_minimize, target_hint)
     encoded = json.dumps(summary, indent=2, sort_keys=True) + "\n"
     if args.json_out:

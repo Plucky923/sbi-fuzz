@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import hashlib
 import json
 from collections import Counter
 from datetime import datetime, timezone
@@ -50,14 +51,16 @@ def main() -> int:
         bucket_count = int(bucket.get("count", 1) or 1)
         by_classification[classification] += bucket_count
         candidate_count += bucket_count
+        dedup_key = bucket.get("dedup_key", key)
+        bug_id = bucket.get("bug_id") or f"bug-{hashlib.sha256(str(dedup_key).encode()).hexdigest()[:12]}"
         bug_buckets[key] = {
             "count": bucket_count,
-            "bug_id": bucket.get("bug_id"),
+            "bug_id": bug_id,
             "classification": classification,
             "impact": bucket.get("impact", classification),
             "affected_target": bucket.get("affected_target") or bucket.get("target_kind"),
-            "dedup_key": bucket.get("dedup_key", key),
-            "signature": bucket.get("dedup_key", key),
+            "dedup_key": dedup_key,
+            "signature": dedup_key,
             "raw_signature": bucket.get("violation_detail", key),
             "instruction_signature": bucket.get("violation_detail", key),
             "impl_kind": bucket.get("target_kind"),

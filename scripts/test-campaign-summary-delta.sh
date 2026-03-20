@@ -174,4 +174,36 @@ python3 "$repo_root/scripts/report-sbi-bugs.py" \
   --json-out "$generic_json" >/dev/null
 rg -n '"affected_target": "opensbi"' "$generic_json" >/dev/null
 
+unknown_target_json="$tmp_dir/unknown-target.json"
+cat > "$unknown_target_json" <<'JSON'
+{
+  "target_kind": "unknown",
+  "results": [
+    {
+      "actual": "Crash",
+      "classification": "crash",
+      "expected": "Timeout",
+      "extension": "hsm",
+      "fid": "0x0",
+      "hash": "unknownaaaa1111",
+      "input": "unknown-case.exec",
+      "interesting": true,
+      "notes": [],
+      "output_excerpt": "crash",
+      "eid": "0x48534D",
+      "signals": [],
+      "signature": "exit:Crash",
+      "trap": null
+    }
+  ]
+}
+JSON
+
+unknown_out="$tmp_dir/unknown-out.json"
+python3 "$repo_root/scripts/report-sbi-bugs.py" \
+  "$unknown_target_json" \
+  --label rustsbi-prototyper \
+  --json-out "$unknown_out" >/dev/null
+rg -n '"affected_target": "rustsbi"' "$unknown_out" >/dev/null
+
 echo "campaign summary delta test passed"
