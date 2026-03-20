@@ -8,7 +8,10 @@ trap 'rm -rf "$tmp_dir"' EXIT
 cp "$repo_root/Makefile" "$tmp_dir/Makefile"
 cp -R "$repo_root/scripts" "$tmp_dir/scripts"
 
-mkdir -p "$tmp_dir/output/host_fuzz" "$tmp_dir/output/sequence/campaigns/seq-run" "$tmp_dir/playground/opensbi-fuzz/output/bugs"
+mkdir -p "$tmp_dir/output/host_fuzz" \
+  "$tmp_dir/output/sequence/campaigns/seq-run" \
+  "$tmp_dir/playground/opensbi-fuzz/output/bugs" \
+  "$tmp_dir/playground/rustsbi-fuzz/output/campaigns/run-1"
 
 cat >"$tmp_dir/output/host_fuzz/triage.json" <<'JSON'
 {
@@ -70,6 +73,21 @@ cat >"$tmp_dir/playground/opensbi-fuzz/output/bugs/result.replay.json" <<'JSON'
 }
 JSON
 
+cat >"$tmp_dir/playground/rustsbi-fuzz/output/campaigns/run-1/bugs.json" <<'JSON'
+{
+  "buckets": {
+    "qemu-b": {
+      "impl_kind": "rustsbi",
+      "eid": 16,
+      "fid": 0,
+      "classification": "spec_violation",
+      "raw_signature": "{\"WrongErrorCode\":{\"expected\":0}}",
+      "input": "output/bugs/campaign.exec"
+    }
+  }
+}
+JSON
+
 make -C "$tmp_dir" cross-layer-dedup >/dev/null
 
 python3 - "$tmp_dir/output/host_fuzz/cross-layer.json" <<'PY'
@@ -84,6 +102,7 @@ assert bug["source_reproducers"]["host"] == "output/host_fuzz/a.json", bug
 assert bug["source_reproducers"]["sequence"] == "output/sequence/seq.json", bug
 assert bug["source_reproducers"]["qemu"] == "output/bugs/qemu.exec", bug
 assert "output/bugs/ignored.exec" not in bug["reproducers"], bug
+assert "output/bugs/campaign.exec" in bug["reproducers"], bug
 PY
 
 echo "default cross-layer dedup test passed"

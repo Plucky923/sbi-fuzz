@@ -28,6 +28,14 @@ while IFS= read -r path; do
     args+=(--source "qemu=${path}")
 done < <(find "$ROOT_DIR/playground" -path '*/output/bugs/*.bugs.json' -type f 2>/dev/null | sort)
 
+while IFS= read -r path; do
+    label="qemu"
+    if [[ "$path" == *"/output/sequence/"* ]]; then
+        label="sequence"
+    fi
+    args+=(--source "${label}=${path}")
+done < <(find "$ROOT_DIR" -path '*/campaigns/*/bugs.json' -type f 2>/dev/null | sort)
+
 if [[ ${#args[@]} -eq 0 ]]; then
     echo "no cross-layer inputs found under standard output locations" >&2
     exit 1
