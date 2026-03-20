@@ -115,9 +115,10 @@ cat > "$triage_json" <<'JSON'
     },
     "rustsbi|0x10|0x2|spec_violation|reopened": {
       "affected_target": "rustsbi",
-      "bug_id": "bug-reopened",
       "classification": "spec_violation",
       "dedup_key": "rustsbi|0x10|0x2|spec_violation|reopened",
+      "eid": "0x10",
+      "fid": "0x2",
       "first_seen": "2026-03-18T00:00:00Z",
       "impact": "spec_violation",
       "last_seen": "2026-03-20T01:00:00Z",
@@ -125,7 +126,8 @@ cat > "$triage_json" <<'JSON'
         "attempts": 1,
         "label": "single_replay",
         "stable_ratio": 1.0
-      }
+      },
+      "signature": "reopened"
     },
     "rustsbi|0x10|0x3|hang|slow": {
       "affected_target": "rustsbi",
@@ -150,7 +152,11 @@ cat > "$closed_json" <<'JSON'
 {
   "buckets": {
     "closed-bucket": {
-      "bug_id": "bug-reopened"
+      "affected_target": "rustsbi",
+      "classification": "spec_violation",
+      "eid": "0x10",
+      "fid": "0x2",
+      "signature": "reopened"
     }
   },
   "candidate_count": 1,
@@ -184,7 +190,7 @@ rg -n '"status": "fail"' "$gate_json" >/dev/null
 rg -n '"code": "new_high_severity_bugs"' "$gate_json" >/dev/null
 rg -n '"bug-new-crash"' "$gate_json" >/dev/null
 rg -n '"code": "reopened_bugs"' "$gate_json" >/dev/null
-rg -n '"bug-reopened"' "$gate_json" >/dev/null
+rg -n '"bug-.*"' "$gate_json" >/dev/null
 rg -n '"code": "high_hang_bucket_ratio"' "$gate_json" >/dev/null
 
 echo "campaign quality gate test passed"

@@ -5,7 +5,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-from campaign_utils import canonical_bug_id_from_legacy_bucket
+from campaign_utils import bug_id_from_bucket as shared_bug_id_from_bucket
 
 
 def utc_now() -> str:
@@ -54,7 +54,7 @@ def make_check(actual, threshold, op: str) -> dict:
     }
 
 
-def bug_id_from_bucket(bucket: dict) -> str:
+def current_bug_id_from_bucket(bucket: dict) -> str:
     if bucket.get("bug_id"):
         return str(bucket["bug_id"])
     dedup_key = bucket.get("dedup_key")
@@ -88,7 +88,7 @@ def summarize_triage(data: dict) -> dict:
     results = data.get("results", [])
     buckets = data.get("buckets", {})
     bucket_items = list(buckets.values()) if isinstance(buckets, dict) else []
-    bug_index = {bug_id_from_bucket(bucket): bucket for bucket in bucket_items}
+    bug_index = {current_bug_id_from_bucket(bucket): bucket for bucket in bucket_items}
     hang_bug_ids = sorted(
         bug_id
         for bug_id, bucket in bug_index.items()
@@ -124,7 +124,7 @@ def load_closed_bug_ids(path: Path | None) -> set[str]:
             return {str(item) for item in data["closed_bug_ids"]}
         if isinstance(data.get("buckets"), dict):
             return {
-                item.get("bug_id") or canonical_bug_id_from_legacy_bucket(data, key, item)
+                shared_bug_id_from_bucket(data, key, item)
                 for key, item in data["buckets"].items()
             }
         if isinstance(data.get("bugs"), dict):

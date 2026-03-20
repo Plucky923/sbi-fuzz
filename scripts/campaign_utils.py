@@ -141,8 +141,7 @@ def bug_ids_from_summary(summary: dict | None, parent_summary: dict | None = Non
     if isinstance(buckets, dict):
         return sorted(
             {
-                bucket.get("bug_id")
-                or canonical_bug_id_from_legacy_bucket(parent_summary or summary, key, bucket)
+                bug_id_from_bucket(parent_summary or summary, key, bucket)
                 for key, bucket in buckets.items()
             }
         )
@@ -177,6 +176,26 @@ def canonical_bug_id_from_legacy_bucket(summary: dict | None, key: str, bucket: 
     return f"bug-{hashlib.sha256(str(dedup_key).encode()).hexdigest()[:12]}"
 
 
+def bug_id_from_bucket(summary: dict | None, key: str, bucket: dict):
+    if bucket.get("bug_id"):
+        return str(bucket["bug_id"])
+    dedup_key = bucket.get("dedup_key")
+    if not dedup_key:
+        affected_target = bucket.get("affected_target") or bucket.get("target_kind")
+        if not affected_target:
+            affected_target = normalize_summary_target(summary)
+        dedup_key = "|".join(
+            [
+                str(affected_target or "unknown"),
+                str(bucket.get("eid", 0)),
+                str(bucket.get("fid", 0)),
+                str(bucket.get("classification") or bucket.get("violation_type") or "unknown"),
+                str(bucket.get("violation_detail") or bucket.get("raw_signature") or bucket.get("signature") or key),
+            ]
+        )
+    return f"bug-{hashlib.sha256(str(dedup_key).encode()).hexdigest()[:12]}"
+
+
 def previous_bug_ids(summary: dict | None, summary_path: Path | None = None):
     if not summary:
         return set(), set()
@@ -189,7 +208,7 @@ def previous_bug_ids(summary: dict | None, summary_path: Path | None = None):
             current_ids = summary["current_bug_ids"]
         elif isinstance(summary.get("confirmed_bug_like_buckets"), dict):
             current_ids = [
-                bucket.get("bug_id") or canonical_bug_id_from_legacy_bucket(summary, key, bucket)
+                bug_id_from_bucket(summary, key, bucket)
                 for key, bucket in summary["confirmed_bug_like_buckets"].items()
             ]
         elif isinstance(summary.get("artifacts"), dict) and summary["artifacts"].get("bug_json"):
