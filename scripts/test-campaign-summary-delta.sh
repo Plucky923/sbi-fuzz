@@ -95,4 +95,37 @@ python3 "$repo_root/scripts/run-sequence-campaign.py" \
 
 rg -n '"finding_sets":' "$summary_sequence_json" >/dev/null
 
+replay_json="$tmp_dir/replay.json"
+cat > "$replay_json" <<'JSON'
+{
+  "results": [
+    {
+      "actual": "Crash",
+      "classification": "crash",
+      "expected": "Timeout",
+      "extension": "hsm",
+      "fid": "0x0",
+      "hash": "labelaaaa1111",
+      "input": "label-case.exec",
+      "interesting": true,
+      "notes": [],
+      "output_excerpt": "crash",
+      "eid": "0x48534D",
+      "signals": [],
+      "signature": "exit:Crash",
+      "trap": null
+    }
+  ]
+}
+JSON
+
+canonical_json="$tmp_dir/canonical.json"
+python3 "$repo_root/scripts/report-sbi-bugs.py" \
+  "$replay_json" \
+  --label rustsbi-prototyper \
+  --json-out "$canonical_json" >/dev/null
+
+rg -n '"affected_target": "rustsbi"' "$canonical_json" >/dev/null
+rg -n '"dedup_key": "rustsbi\|' "$canonical_json" >/dev/null
+
 echo "campaign summary delta test passed"

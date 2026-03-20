@@ -70,6 +70,9 @@ test-sequence-bug-report:
 test-campaign-summary-delta:
 	@bash ./scripts/test-campaign-summary-delta.sh
 
+test-merge-host-triage:
+	@bash ./scripts/test-merge-host-triage.sh
+
 triage-host-fuzz:
 	@python3 ./scripts/triage-host-fuzz-results.py ./output/host_fuzz/fuzz_ecall_rustsbi --json-out ./output/host_fuzz/triage.json --md-out ./output/host_fuzz/triage.md
 
@@ -243,6 +246,7 @@ help:
 	@echo "  test-cross-layer-dedup - Verify stable bug IDs merge across host and system report inputs"
 	@echo "  test-sequence-bug-report - Verify sequence bug reports satisfy the shared schema contract"
 	@echo "  test-campaign-summary-delta - Verify campaign summaries compute new/fixed/regressed/persisting finding sets"
+	@echo "  test-merge-host-triage - Verify merged host triage preserves crash severity semantics"
 	@echo "  test-s0-workflow       - Run the documented preflight/smoke/report chain in deterministic fixture mode"
 	@echo "  triage-host-fuzz       - Triage host_harness fuzz artifacts into JSON/Markdown"
 	@echo "  collect-metrics        - Summarize libFuzzer metrics from host-side logs"
@@ -292,4 +296,4 @@ help:
 	@echo "  clean-generated        - Clean generated local samples and reports"
 	@echo "  help                   - Display this help message"
 
-.PHONY: all compile docs-check preflight-real preflight-fixture check-env check-env-smoke preflight test-common test-host-harness test-regression test-docs-check test-campaign-quality-gate test-cross-layer-dedup test-sequence-bug-report test-campaign-summary-delta test-s0-workflow test-linux-corpus-import test-opensbi-triage test-opensbi-replay test-opensbi-replay-summary test-opensbi-sanitizer-demo test-opensbi-coverage test-opensbi-bug-report test-rustsbi-scenarios test-rustsbi-replay test-rustsbi-helper-timeout test-rustsbi-collect-coverage-timeout test-rustsbi-hang-stability test-rustsbi-hang-minimize test-sbi-hang-semantic-buckets test-rustsbi-fuzz-finds-bug test-sequence-replay triage-host-fuzz collect-metrics quality-gate campaign-quality-gate cross-layer-dedup host-fuzz-corpus smoke-all host-fuzz-smoke host-fuzz-rustsbi host-fuzz-sequence host-fuzz-diff host-fuzz-diff-ecall host-fuzz-diff-sequence report-all host-fuzz-60 host-fuzz-60-complex sequence-seeds campaign-sequence-opensbi campaign-sequence-rustsbi campaign-opensbi campaign-rustsbi campaign-rustsbi-complex fuzzer helper injector clean clean-cargo clean-injector clean-playgrounds clean-generated help
+.PHONY: all compile docs-check preflight-real preflight-fixture check-env check-env-smoke preflight test-common test-host-harness test-regression test-docs-check test-campaign-quality-gate test-cross-layer-dedup test-sequence-bug-report test-campaign-summary-delta test-merge-host-triage test-s0-workflow test-linux-corpus-import test-opensbi-triage test-opensbi-replay test-opensbi-replay-summary test-opensbi-sanitizer-demo test-opensbi-coverage test-opensbi-bug-report test-rustsbi-scenarios test-rustsbi-replay test-rustsbi-helper-timeout test-rustsbi-collect-coverage-timeout test-rustsbi-hang-stability test-rustsbi-hang-minimize test-sbi-hang-semantic-buckets test-rustsbi-fuzz-finds-bug test-sequence-replay triage-host-fuzz collect-metrics quality-gate campaign-quality-gate cross-layer-dedup host-fuzz-corpus smoke-all host-fuzz-smoke host-fuzz-rustsbi host-fuzz-sequence host-fuzz-diff host-fuzz-diff-ecall host-fuzz-diff-sequence report-all host-fuzz-60 host-fuzz-60-complex sequence-seeds campaign-sequence-opensbi campaign-sequence-rustsbi campaign-opensbi campaign-rustsbi campaign-rustsbi-complex fuzzer helper injector clean clean-cargo clean-injector clean-playgrounds clean-generated help

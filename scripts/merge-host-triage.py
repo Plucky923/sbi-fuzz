@@ -12,6 +12,17 @@ def utc_now() -> str:
 
 
 def merge_buckets(entries: list[dict]) -> dict:
+    def impact_for_entry(entry: dict) -> str:
+        classification = entry.get("classification")
+        violation_type = entry.get("violation_type")
+        if classification in {"sanitizer", "crash"}:
+            return "crash"
+        if classification == "hang":
+            return "hang"
+        if violation_type in {"spec_violation", "memory_violation"} or entry.get("confirmed"):
+            return "spec_violation"
+        return entry.get("impact") or classification or "unknown"
+
     def entry_dedup_key(entry: dict) -> str:
         if entry.get("dedup_key"):
             return entry["dedup_key"]
@@ -48,7 +59,7 @@ def merge_buckets(entries: list[dict]) -> dict:
             "reproducer": rep.get("path") or rep.get("reproducer"),
             "hashes": sorted(set(hashes)),
             "affected_target": rep.get("affected_target"),
-            "impact": rep.get("impact"),
+            "impact": impact_for_entry(rep),
             "dedup_key": rep.get("dedup_key", key),
             "bug_id": rep.get("bug_id") or f"bug-{hashlib.sha256(key.encode()).hexdigest()[:12]}",
             "repro_stability": rep.get(
