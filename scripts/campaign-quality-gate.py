@@ -120,6 +120,12 @@ def load_closed_bug_ids(path: Path | None) -> set[str]:
     if isinstance(data, dict):
         if isinstance(data.get("closed_bug_ids"), list):
             return {str(item) for item in data["closed_bug_ids"]}
+        if isinstance(data.get("buckets"), dict):
+            return {
+                str(item.get("bug_id"))
+                for item in data["buckets"].values()
+                if item.get("bug_id")
+            }
         if isinstance(data.get("bugs"), dict):
             return {str(item.get("bug_id")) for item in data["bugs"].values() if item.get("bug_id")}
     return set()

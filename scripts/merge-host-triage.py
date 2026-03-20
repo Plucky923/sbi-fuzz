@@ -125,26 +125,29 @@ def main() -> int:
             entries.extend(current_entries)
             continue
         for bucket in data.get("buckets", {}).values():
-            entries.append(
-                {
-                    "affected_target": bucket.get("affected_target"),
-                    "target_kind": bucket.get("target_kind"),
-                    "eid": bucket.get("eid"),
-                    "fid": bucket.get("fid"),
-                    "classification": bucket.get("classification"),
-                    "violation_type": bucket.get("violation_type"),
-                    "violation_detail": bucket.get("violation_detail"),
-                    "dedup_key": bucket.get("dedup_key"),
-                    "bug_id": bucket.get("bug_id"),
-                    "hashes": bucket.get("hashes", []),
-                    "first_seen": bucket.get("first_seen"),
-                    "last_seen": bucket.get("last_seen"),
-                    "repro_stability": bucket.get("repro_stability"),
-                    "path": bucket.get("reproducer"),
-                    "reproducer": bucket.get("reproducer"),
-                    "impact": bucket.get("impact"),
-                }
-            )
+            bucket_count = int(bucket.get("count", 1) or 1)
+            for _ in range(bucket_count):
+                entries.append(
+                    {
+                        "affected_target": bucket.get("affected_target"),
+                        "target_kind": bucket.get("target_kind"),
+                        "eid": bucket.get("eid"),
+                        "fid": bucket.get("fid"),
+                        "classification": bucket.get("classification"),
+                        "violation_type": bucket.get("violation_type"),
+                        "violation_detail": bucket.get("violation_detail"),
+                        "dedup_key": bucket.get("dedup_key"),
+                        "bug_id": bucket.get("bug_id"),
+                        "hashes": bucket.get("hashes", []),
+                        "first_seen": bucket.get("first_seen"),
+                        "last_seen": bucket.get("last_seen"),
+                        "repro_stability": bucket.get("repro_stability"),
+                        "path": bucket.get("reproducer"),
+                        "reproducer": bucket.get("reproducer"),
+                        "impact": bucket.get("impact"),
+                        "confirmed": bucket.get("impact") == "crash",
+                    }
+                )
 
     summary = {
         "schema_version": 1,

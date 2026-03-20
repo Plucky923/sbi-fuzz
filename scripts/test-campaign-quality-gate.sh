@@ -148,9 +148,16 @@ JSON
 closed_json="$out_dir/closed.json"
 cat > "$closed_json" <<'JSON'
 {
-  "closed_bug_ids": [
-    "bug-reopened"
-  ]
+  "buckets": {
+    "closed-bucket": {
+      "bug_id": "bug-reopened"
+    }
+  },
+  "candidate_count": 1,
+  "generated_at_utc": "2026-03-19T00:00:00Z",
+  "report_type": "bug_report",
+  "schema_version": 1,
+  "total_results": 1
 }
 JSON
 

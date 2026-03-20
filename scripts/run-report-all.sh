@@ -83,6 +83,8 @@ run_quality_gate() {
     return "$gate_rc"
 }
 
+require_smoke_inputs
+
 if [[ "$USE_FIXTURES" == "1" ]]; then
     mkdir -p "$HOST_OUT_ROOT"
     prepare_triage_parts_dir
@@ -121,7 +123,6 @@ EOF
     exit "$gate_rc"
 fi
 
-require_smoke_inputs
 prepare_triage_parts_dir
 
 python3 "$ROOT_DIR/scripts/triage-host-fuzz-results.py" \

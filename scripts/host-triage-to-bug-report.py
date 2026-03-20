@@ -43,12 +43,15 @@ def main() -> int:
     bug_buckets = {}
     by_classification = Counter()
     generated_at = utc_now()
+    candidate_count = 0
 
     for key, bucket in buckets.items():
         classification = bucket.get("classification", "unknown")
-        by_classification[classification] += 1
+        bucket_count = int(bucket.get("count", 1) or 1)
+        by_classification[classification] += bucket_count
+        candidate_count += bucket_count
         bug_buckets[key] = {
-            "count": bucket.get("count", 1),
+            "count": bucket_count,
             "bug_id": bucket.get("bug_id"),
             "classification": classification,
             "impact": bucket.get("impact", classification),
@@ -90,10 +93,10 @@ def main() -> int:
         "generated_at_utc": generated_at,
         "report_type": "bug_report",
         "total_results": triage.get("total_cases", len(bug_buckets)),
-        "candidate_count": len(bug_buckets),
+        "candidate_count": candidate_count,
         "by_classification": dict(by_classification),
         "by_signal": {},
-        "by_signature": {bucket["dedup_key"]: 1 for bucket in bug_buckets.values()},
+        "by_signature": {bucket["dedup_key"]: bucket["count"] for bucket in bug_buckets.values()},
         "buckets": bug_buckets,
     }
 
