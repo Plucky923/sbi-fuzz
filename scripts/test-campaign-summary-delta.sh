@@ -11,6 +11,7 @@ repo_root = Path(sys.argv[1])
 sys.path.insert(0, str(repo_root / "scripts"))
 
 from campaign_utils import bug_ids_from_summary, compute_finding_sets  # noqa: E402
+from campaign_utils import canonical_bug_id_from_legacy_bucket, previous_bug_ids  # noqa: E402
 
 current_bugs = {
     "buckets": {
@@ -33,6 +34,21 @@ assert finding_sets["persisting_bug_ids"] == ["bug-a"], finding_sets
 assert finding_sets["fixed_bug_ids"] == ["bug-old"], finding_sets
 assert finding_sets["regressed_bug_ids"] == ["bug-b"], finding_sets
 assert finding_sets["new_bug_ids"] == [], finding_sets
+
+legacy_bug_summary = {
+    "name": "rustsbi-prototyper",
+    "artifacts": {
+        "bug_json": str(repo_root / "tests/fixtures/workflow/legacy-firmware-bugs.json"),
+    },
+}
+current_ids, fixed_ids = previous_bug_ids(legacy_bug_summary, Path("legacy-summary.json"))
+expected_legacy = canonical_bug_id_from_legacy_bucket(
+    legacy_bug_summary,
+    "legacy-firmware-signature",
+    {"classification": "crash", "signature": "legacy-firmware-signature"},
+)
+assert current_ids == {expected_legacy}, current_ids
+assert fixed_ids == set(), fixed_ids
 PY
 
 tmp_dir="$(mktemp -d)"

@@ -134,14 +134,15 @@ def load_optional_json(path: Path | None):
         return None
 
 
-def bug_ids_from_summary(summary: dict | None):
+def bug_ids_from_summary(summary: dict | None, parent_summary: dict | None = None):
     if not summary:
         return []
     buckets = summary.get("buckets")
     if isinstance(buckets, dict):
         return sorted(
             {
-                bucket.get("bug_id") or canonical_bug_id_from_legacy_bucket(summary, key, bucket)
+                bucket.get("bug_id")
+                or canonical_bug_id_from_legacy_bucket(parent_summary or summary, key, bucket)
                 for key, bucket in buckets.items()
             }
         )
@@ -196,7 +197,7 @@ def previous_bug_ids(summary: dict | None, summary_path: Path | None = None):
             if not bug_json_path.is_absolute() and summary_path:
                 bug_json_path = (summary_path.parent / bug_json_path).resolve()
             if bug_json_path.exists():
-                current_ids = bug_ids_from_summary(json.loads(bug_json_path.read_text()))
+                current_ids = bug_ids_from_summary(json.loads(bug_json_path.read_text()), summary)
             else:
                 current_ids = []
         else:

@@ -9,6 +9,26 @@ triage_json="$out_dir/triage.json"
 cat > "$triage_json" <<'JSON'
 {
   "buckets": {
+    "opensbi|16|1|ok|semantic:base-ok": {
+      "affected_target": "opensbi",
+      "classification": "ok",
+      "count": 2,
+      "dedup_key": "opensbi|16|1|ok|semantic:base-ok",
+      "eid": 16,
+      "fid": 1,
+      "first_seen": "2026-03-20T00:00:00Z",
+      "impact": "ok",
+      "last_seen": "2026-03-20T00:00:00Z",
+      "repro_stability": {
+        "attempts": 1,
+        "label": "single_replay",
+        "stable_ratio": 1.0
+      },
+      "reproducer": "fixture-ok.host",
+      "target_kind": "opensbi",
+      "violation_detail": "semantic:base-ok",
+      "violation_type": "ok"
+    },
     "opensbi|16|0|spec_violation|semantic:base": {
       "affected_target": "opensbi",
       "classification": "spec_violation",
@@ -42,6 +62,7 @@ python3 "$repo_root/scripts/host-triage-to-bug-report.py" "$triage_json" --json-
 rg -n '"bug_id": "bug-' "$json_out" >/dev/null
 rg -n '"candidate_count": 3' "$json_out" >/dev/null
 rg -n '"spec_violation": 3' "$json_out" >/dev/null
+! rg -n '"ok":' "$json_out" >/dev/null
 rg -n '"opensbi\|16\|0\|spec_violation\|semantic:base": 3' "$json_out" >/dev/null
 
 echo "host triage to bug report test passed"

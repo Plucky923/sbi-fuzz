@@ -31,6 +31,16 @@ def write_markdown(summary: dict, output: Path, label: str) -> None:
     output.write_text("\n".join(lines) + "\n")
 
 
+def is_bug_bucket(bucket: dict) -> bool:
+    classification = str(bucket.get("classification") or "").strip().lower()
+    impact = str(bucket.get("impact") or "").strip().lower()
+    if classification in {"", "ok", "match"}:
+        return False
+    if impact in {"", "ok"}:
+        return False
+    return True
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Convert host triage output into bug-report schema")
     parser.add_argument("input", type=Path)
@@ -47,6 +57,8 @@ def main() -> int:
     candidate_count = 0
 
     for key, bucket in buckets.items():
+        if not is_bug_bucket(bucket):
+            continue
         classification = bucket.get("classification", "unknown")
         bucket_count = int(bucket.get("count", 1) or 1)
         by_classification[classification] += bucket_count
