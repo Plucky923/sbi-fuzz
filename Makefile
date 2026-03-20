@@ -88,7 +88,9 @@ quality-gate:
 campaign-quality-gate: quality-gate
 
 cross-layer-dedup:
-	@python3 ./scripts/cross-layer-dedup.py ./output/host_fuzz/triage.json ./output/host_fuzz/opensbi.bugs.json --json-out ./output/host_fuzz/cross-layer.json
+	@INPUTS="./output/host_fuzz/triage.json"; \
+	if [ -f ./output/host_fuzz/opensbi.bugs.json ]; then INPUTS="$$INPUTS ./output/host_fuzz/opensbi.bugs.json"; fi; \
+	python3 ./scripts/cross-layer-dedup.py $$INPUTS --json-out ./output/host_fuzz/cross-layer.json
 
 host-fuzz-corpus:
 	@./scripts/prepare-host-fuzz-corpus.sh

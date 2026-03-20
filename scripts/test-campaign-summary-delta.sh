@@ -143,4 +143,35 @@ python3 "$repo_root/scripts/report-sbi-bugs.py" \
 rg -n '"affected_target": "rustsbi"' "$canonical_json" >/dev/null
 rg -n '"dedup_key": "rustsbi\|' "$canonical_json" >/dev/null
 
+replay_summary="$tmp_dir/replay-summary.json"
+cat > "$replay_summary" <<'JSON'
+{
+  "target_kind": "opensbi",
+  "results": [
+    {
+      "actual": "Crash",
+      "classification": "crash",
+      "expected": "Timeout",
+      "extension": "hsm",
+      "fid": "0x0",
+      "hash": "genericaaaa1111",
+      "input": "generic-case.exec",
+      "interesting": true,
+      "notes": [],
+      "output_excerpt": "crash",
+      "eid": "0x48534D",
+      "signals": [],
+      "signature": "exit:Crash",
+      "trap": null
+    }
+  ]
+}
+JSON
+
+generic_json="$tmp_dir/generic.json"
+python3 "$repo_root/scripts/report-sbi-bugs.py" \
+  "$replay_summary" \
+  --json-out "$generic_json" >/dev/null
+rg -n '"affected_target": "opensbi"' "$generic_json" >/dev/null
+
 echo "campaign summary delta test passed"

@@ -202,6 +202,15 @@ def normalize_affected_target(value: str | None) -> str:
     return normalized or "unknown"
 
 
+def infer_firmware_target_kind(target: Path) -> str:
+    target_text = str(target).lower()
+    if "opensbi" in target_text or "fw_dynamic.bin" in target_text:
+        return "opensbi"
+    if "rustsbi" in target_text or "prototyper" in target_text:
+        return "rustsbi"
+    return "unknown"
+
+
 def affected_target_for_item(item: dict, target_hint: str | None = None) -> str:
     classification = item.get("classification", "unknown")
     if classification in {"mismatch", "match", "capability_mismatch"}:
@@ -1173,8 +1182,14 @@ def replay_cli(default_label: str = "SBI") -> int:
         )
         for case in cases
     ]
+    target_kind = infer_firmware_target_kind(args.target)
+    if target_kind != "unknown":
+        for item in results:
+            if not item.get("impl_kind"):
+                item["impl_kind"] = target_kind
     summary = {
         "label": args.label,
+        "target_kind": target_kind,
         "result_dir": str(args.result_dir),
         "total": len(results),
         "matching": sum(1 for item in results if item["match"]),
@@ -1304,7 +1319,8 @@ def report_bugs_cli(default_label: str = "SBI") -> int:
     hang_minimize = (
         json.loads(args.hang_minimize.read_text()) if args.hang_minimize else None
     )
-    summary = summarize_bug_report(results, hang_stability, hang_minimize, args.label)
+    target_hint = data.get("target_kind") or args.label
+    summary = summarize_bug_report(results, hang_stability, hang_minimize, target_hint)
     encoded = json.dumps(summary, indent=2, sort_keys=True) + "\n"
     if args.json_out:
         args.json_out.write_text(encoded)

@@ -93,4 +93,8 @@ rg -n '"bugs"' "$json_out" >/dev/null
 rg -n '"system-case.exec"' "$json_out" >/dev/null
 rg -n '"host-case.host"' "$json_out" >/dev/null
 
+single_json="$out_dir/cross-layer-single.json"
+python3 "$repo_root/scripts/cross-layer-dedup.py" "$host_json" --json-out "$single_json" > "$out_dir/stdout-single.json"
+rg -n '"total_unique": 1' "$single_json" >/dev/null
+
 echo "cross-layer dedup test passed"
