@@ -37,21 +37,21 @@ make report-all
 
 Expected outputs:
 
-- `output/host_fuzz/logs/` for integrated S0 smoke and report logs
-- `output/host_fuzz/fuzz_ecall_opensbi/`
-- `output/host_fuzz/fuzz_ecall_rustsbi/`
-- `output/host_fuzz/fuzz_sequence_both/`
-- `output/host_fuzz/fuzz_diff_ecall/`
-- `output/host_fuzz/fuzz_diff_sequence/`
-- `output/host_fuzz/triage.json`
-- `output/host_fuzz/triage.md`
-- `output/host_fuzz/opensbi.triage.json`
-- `output/host_fuzz/opensbi.triage.md`
-- `output/host_fuzz/metrics.json`
-- `output/host_fuzz/opensbi.bugs.json`
-- `output/host_fuzz/opensbi.bugs.md`
-- `output/host_fuzz/cross-layer.json`
-- `output/host_fuzz/quality_gate.json`
+- `output/host_fuzz_smoke/logs/` for integrated S0 smoke and report logs
+- `output/host_fuzz_smoke/fuzz_ecall_opensbi/`
+- `output/host_fuzz_smoke/fuzz_ecall_rustsbi/`
+- `output/host_fuzz_smoke/fuzz_sequence_both/`
+- `output/host_fuzz_smoke/fuzz_diff_ecall/`
+- `output/host_fuzz_smoke/fuzz_diff_sequence/`
+- `output/host_fuzz_smoke/triage.json`
+- `output/host_fuzz_smoke/triage.md`
+- `output/host_fuzz_smoke/opensbi.triage.json`
+- `output/host_fuzz_smoke/opensbi.triage.md`
+- `output/host_fuzz_smoke/metrics.json`
+- `output/host_fuzz_smoke/opensbi.bugs.json`
+- `output/host_fuzz_smoke/opensbi.bugs.md`
+- `output/host_fuzz_smoke/cross-layer.json`
+- `output/host_fuzz_smoke/quality_gate.json`
 
 Success criteria:
 
@@ -166,14 +166,15 @@ Escalation:
 ## Artifact Map
 
 - Host smoke logs: `output/host_fuzz_smoke/logs/`
-- Integrated S0 logs: `output/host_fuzz/logs/`
-- Host triage outputs: `output/host_fuzz/triage.json`, `output/host_fuzz/triage.md`
-- OpenSBI host triage mirror: `output/host_fuzz/opensbi.triage.json`, `output/host_fuzz/opensbi.triage.md`
-- Host metrics: `output/host_fuzz/metrics.json`
-- OpenSBI bug report mirror: `output/host_fuzz/opensbi.bugs.json`, `output/host_fuzz/opensbi.bugs.md`
-- Cross-layer dedup output: `output/host_fuzz/cross-layer.json`
-- Host gate result: `output/host_fuzz/quality_gate.json`
-- Standalone `make host-fuzz-smoke` logs: `output/host_fuzz_smoke/logs/`
+- Integrated S0 root: `output/host_fuzz_smoke/`
+- Integrated S0 logs: `output/host_fuzz_smoke/logs/`
+- Host triage outputs: `output/host_fuzz_smoke/triage.json`, `output/host_fuzz_smoke/triage.md`
+- OpenSBI host triage mirror: `output/host_fuzz_smoke/opensbi.triage.json`, `output/host_fuzz_smoke/opensbi.triage.md`
+- Host metrics: `output/host_fuzz_smoke/metrics.json`
+- OpenSBI bug report mirror: `output/host_fuzz_smoke/opensbi.bugs.json`, `output/host_fuzz_smoke/opensbi.bugs.md`
+- Cross-layer dedup output: `output/host_fuzz_smoke/cross-layer.json`
+- Host gate result: `output/host_fuzz_smoke/quality_gate.json`
+- Long-lived host campaign root: `output/host_fuzz/`
 - OpenSBI campaign summary: `playground/opensbi-fuzz/output/campaign/latest.json`
 - RustSBI campaign summary: `playground/rustsbi-fuzz/output/campaign/latest.json`
 

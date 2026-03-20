@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 USE_FIXTURES="${SBIFUZZ_USE_FIXTURES:-0}"
-HOST_OUT_ROOT="$ROOT_DIR/output/host_fuzz"
+HOST_OUT_ROOT="$ROOT_DIR/output/host_fuzz_smoke"
 
 reset_dir() {
     local dir="$1"
@@ -25,7 +25,7 @@ EOF
     done
 
     cat > "$HOST_OUT_ROOT/logs/fuzz_ecall_rustsbi.log" <<'EOF'
-[2026-03-20T00:00:00+00:00] target=fuzz_ecall_rustsbi corpus=fixture artifacts=output/host_fuzz/fuzz_ecall_rustsbi jobs=1 workers=1 max_total_time=10
+[2026-03-20T00:00:00+00:00] target=fuzz_ecall_rustsbi corpus=fixture artifacts=output/host_fuzz_smoke/fuzz_ecall_rustsbi jobs=1 workers=1 max_total_time=10
 #1 INITED cov: 10 ft: 10 corp: 1/1b exec/s: 50 rss: 100Mb
 #2 NEW cov: 11 ft: 11 corp: 2/2b exec/s: 55 rss: 110Mb
 Done 1500 runs in 30 second(s)
@@ -36,4 +36,4 @@ EOF
 fi
 
 "$ROOT_DIR/scripts/prepare-host-fuzz-corpus.sh"
-SBIFUZZ_OUT_ROOT="$HOST_OUT_ROOT" "$ROOT_DIR/scripts/smoke-host-harness-fuzz.sh"
+"$ROOT_DIR/scripts/smoke-host-harness-fuzz.sh"

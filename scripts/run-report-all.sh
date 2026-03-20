@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 USE_FIXTURES="${SBIFUZZ_USE_FIXTURES:-0}"
-HOST_OUT_ROOT="$ROOT_DIR/output/host_fuzz"
+HOST_OUT_ROOT="$ROOT_DIR/output/host_fuzz_smoke"
 FIXTURE_ROOT="$ROOT_DIR/tests/fixtures/workflow"
 TRIAGE_PARTS_DIR="$HOST_OUT_ROOT/triage-parts"
 OPENSBI_TRIAGE_JSON="$HOST_OUT_ROOT/opensbi.triage.json"
@@ -126,13 +126,13 @@ fi
 prepare_triage_parts_dir
 
 python3 "$ROOT_DIR/scripts/triage-host-fuzz-results.py" \
-    "$ROOT_DIR/output/host_fuzz/fuzz_ecall_rustsbi" \
+    "$HOST_OUT_ROOT/fuzz_ecall_rustsbi" \
     --all \
     --json-out "$TRIAGE_PARTS_DIR/fuzz_ecall_rustsbi.json" \
     --md-out "$TRIAGE_PARTS_DIR/fuzz_ecall_rustsbi.md" \
     > "$TRIAGE_PARTS_DIR/fuzz_ecall_rustsbi.stdout.json"
 python3 "$ROOT_DIR/scripts/triage-host-fuzz-results.py" \
-    "$ROOT_DIR/output/host_fuzz/fuzz_ecall_opensbi" \
+    "$HOST_OUT_ROOT/fuzz_ecall_opensbi" \
     --all \
     --json-out "$OPENSBI_TRIAGE_JSON" \
     --md-out "$OPENSBI_TRIAGE_MD" \
@@ -140,19 +140,19 @@ python3 "$ROOT_DIR/scripts/triage-host-fuzz-results.py" \
 cp "$OPENSBI_TRIAGE_JSON" "$TRIAGE_PARTS_DIR/fuzz_ecall_opensbi.json"
 cp "$OPENSBI_TRIAGE_MD" "$TRIAGE_PARTS_DIR/fuzz_ecall_opensbi.md"
 python3 "$ROOT_DIR/scripts/triage-host-fuzz-results.py" \
-    "$ROOT_DIR/output/host_fuzz/fuzz_sequence_both" \
+    "$HOST_OUT_ROOT/fuzz_sequence_both" \
     --all \
     --json-out "$TRIAGE_PARTS_DIR/fuzz_sequence_both.json" \
     --md-out "$TRIAGE_PARTS_DIR/fuzz_sequence_both.md" \
     > "$TRIAGE_PARTS_DIR/fuzz_sequence_both.stdout.json"
 python3 "$ROOT_DIR/scripts/triage-host-fuzz-results.py" \
-    "$ROOT_DIR/output/host_fuzz/fuzz_diff_ecall" \
+    "$HOST_OUT_ROOT/fuzz_diff_ecall" \
     --all \
     --json-out "$TRIAGE_PARTS_DIR/fuzz_diff_ecall.json" \
     --md-out "$TRIAGE_PARTS_DIR/fuzz_diff_ecall.md" \
     > "$TRIAGE_PARTS_DIR/fuzz_diff_ecall.stdout.json"
 python3 "$ROOT_DIR/scripts/triage-host-fuzz-results.py" \
-    "$ROOT_DIR/output/host_fuzz/fuzz_diff_sequence" \
+    "$HOST_OUT_ROOT/fuzz_diff_sequence" \
     --all \
     --json-out "$TRIAGE_PARTS_DIR/fuzz_diff_sequence.json" \
     --md-out "$TRIAGE_PARTS_DIR/fuzz_diff_sequence.md" \

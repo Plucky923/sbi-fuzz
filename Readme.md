@@ -176,7 +176,7 @@ SBIFUZZ_USE_FIXTURES=1 make report-all
 
 This fixture mode exercises the same top-level orchestration and validates the generated artifact contract without requiring a live long-running fuzz campaign.
 
-The integrated S0 path now uses `output/host_fuzz/` as its canonical artifact root, so `smoke-all` and `report-all` operate on the same logs and target directories instead of splitting smoke artifacts into a separate tree.
+The integrated S0 path now uses the dedicated `output/host_fuzz_smoke/` root, so `smoke-all` and `report-all` operate on the same smoke outputs without overwriting the longer-lived host campaign artifacts under `output/host_fuzz/`.
 
 This smoke run performs six checks in order:
 
@@ -201,7 +201,7 @@ make collect-metrics
 make quality-gate
 ```
 
-`make report-all` now writes the integrated S0 artifacts under `output/host_fuzz/` and returns a non-zero exit status only when the quality gate intentionally blocks on findings or the generated artifacts fail validation.
+`make report-all` now writes the integrated S0 artifacts under `output/host_fuzz_smoke/` and returns a non-zero exit status only when the quality gate intentionally blocks on findings or the generated artifacts fail validation.
 
 For the more complex multi-hart host-side sequence campaign, use:
 
