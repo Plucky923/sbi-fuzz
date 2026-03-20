@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import json
 import sys
+import hashlib
 import subprocess
 import time
 import tomllib
@@ -138,8 +139,41 @@ def bug_ids_from_summary(summary: dict | None):
         return []
     buckets = summary.get("buckets")
     if isinstance(buckets, dict):
-        return sorted({bucket.get("bug_id") or key for key, bucket in buckets.items()})
+        return sorted(
+            {
+                bucket.get("bug_id") or canonical_bug_id_from_legacy_bucket(summary, key, bucket)
+                for key, bucket in buckets.items()
+            }
+        )
     return []
+
+
+def normalize_summary_target(summary: dict | None):
+    if not summary:
+        return "unknown"
+    candidates = [
+        summary.get("target_kind"),
+        summary.get("name"),
+        summary.get("label"),
+        summary.get("target"),
+    ]
+    for value in candidates:
+        normalized = str(value or "").strip().lower()
+        if "opensbi" in normalized or "open_sbi" in normalized or "open-sbi" in normalized:
+            return "opensbi"
+        if "rustsbi" in normalized or "rust_sbi" in normalized or "rust-sbi" in normalized:
+            return "rustsbi"
+    return "unknown"
+
+
+def canonical_bug_id_from_legacy_bucket(summary: dict | None, key: str, bucket: dict):
+    dedup_key = bucket.get("dedup_key")
+    if not dedup_key:
+        affected_target = normalize_summary_target(summary)
+        classification = bucket.get("classification", "unknown")
+        signature = bucket.get("signature") or bucket.get("raw_signature") or bucket.get("violation_detail") or key
+        dedup_key = f"{affected_target}|{classification}|{signature}"
+    return f"bug-{hashlib.sha256(str(dedup_key).encode()).hexdigest()[:12]}"
 
 
 def previous_bug_ids(summary: dict | None, summary_path: Path | None = None):

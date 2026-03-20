@@ -109,6 +109,8 @@ python3 "$repo_root/scripts/run-sequence-campaign.py" \
   --json-out "$summary_sequence_json" >/dev/null
 
 rg -n '"finding_sets":' "$summary_sequence_json" >/dev/null
+rg -n '"fixed_bug_ids": \[' "$summary_sequence_json" >/dev/null
+rg -n '"bug-sequence-previous"' "$summary_sequence_json" >/dev/null
 
 replay_json="$tmp_dir/replay.json"
 cat > "$replay_json" <<'JSON'

@@ -36,13 +36,11 @@ def impact_for_item(item: dict) -> str:
 
 
 def dedup_key_for_item(source: str, item: dict) -> str:
-    if item.get("dedup_key"):
-        return item["dedup_key"]
     target = normalize_target(item.get("affected_target") or item.get("target_kind") or item.get("impl_kind") or source)
     eid = item.get("eid", 0)
     fid = item.get("fid", 0)
     classification = item.get("classification") or item.get("violation_type") or item.get("violation") or "unknown"
-    detail = item.get("violation_detail") or item.get("signature") or item.get("raw_signature") or "none"
+    detail = item.get("violation_detail") or item.get("raw_signature") or item.get("signature") or "none"
     return f"{target}|{eid}|{fid}|{classification}|{detail}"
 
 

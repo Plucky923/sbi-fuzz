@@ -23,6 +23,7 @@ cat > "$host_json" <<'JSON'
       "impact": "crash",
       "last_seen": "2026-03-20T00:00:00Z",
       "reproducer": "host-case.host",
+      "violation_detail": "same-root-cause",
       "repro_stability": {
         "attempts": 1,
         "label": "single_replay",
@@ -52,6 +53,7 @@ cat > "$bug_json" <<'JSON'
       "impact": "crash",
       "input": "system-case.exec",
       "last_seen": "2026-03-20T01:00:00Z",
+      "raw_signature": "same-root-cause",
       "repro_stability": {
         "attempts": 1,
         "label": "single_replay",
