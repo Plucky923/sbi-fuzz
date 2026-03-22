@@ -141,6 +141,15 @@ def bug_ids_from_summary(summary: dict | None, parent_summary: dict | None = Non
     context.update(summary)
     buckets = summary.get("buckets")
     if isinstance(buckets, dict):
+        if context.get("report_type") == "bug_report":
+            return sorted(
+                {
+                    str(bucket.get("bug_id"))
+                    if bucket.get("bug_id")
+                    else canonical_bug_id_from_legacy_bucket(context, key, bucket)
+                    for key, bucket in buckets.items()
+                }
+            )
         return sorted(
             {
                 bug_id_from_bucket(context, key, bucket)
@@ -223,13 +232,6 @@ def bug_id_from_bucket(summary: dict | None, key: str, bucket: dict):
         ):
             dedup_key = canonicalize_host_triage_dedup_key(key)
             return f"bug-{hashlib.sha256(dedup_key.encode()).hexdigest()[:12]}"
-        if (
-            summary
-            and summary.get("report_type") == "bug_report"
-            and bucket.get("eid") is None
-            and bucket.get("fid") is None
-        ):
-            return canonical_bug_id_from_legacy_bucket(summary, key, bucket)
         affected_target = bucket.get("affected_target") or bucket.get("target_kind")
         if not affected_target:
             affected_target = normalize_summary_target(summary)

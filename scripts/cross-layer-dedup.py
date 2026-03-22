@@ -62,11 +62,22 @@ def dedup_key_for_item(source: str, item: dict, report_type: str | None = None) 
                 ]
             )
         if report_type == "bug_report":
+            if dedup_key.count("|") >= 4:
+                target, eid, fid, classification, detail = dedup_key.split("|", 4)
+                return "|".join(
+                    [
+                        normalize_target(target),
+                        normalize_numeric(eid),
+                        normalize_numeric(fid),
+                        classification,
+                        detail,
+                    ]
+                )
             target = normalize_target(
                 item.get("affected_target") or item.get("target_kind") or item.get("impl_kind") or source
             )
             classification = item.get("classification") or item.get("violation_type") or item.get("violation") or "unknown"
-            detail = item.get("raw_signature") or item.get("violation_detail") or item.get("signature") or "none"
+            detail = item.get("signature") or item.get("raw_signature") or item.get("violation_detail") or "none"
             return "|".join(
                 [
                     target,
