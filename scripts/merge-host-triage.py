@@ -6,6 +6,8 @@ from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
+from campaign_utils import normalize_numeric
+
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
@@ -29,8 +31,8 @@ def merge_buckets(entries: list[dict]) -> dict:
         return "|".join(
             [
                 str(entry.get("affected_target") or entry.get("target_kind") or "unknown"),
-                str(entry.get("eid", 0)),
-                str(entry.get("fid", 0)),
+                normalize_numeric(entry.get("eid", 0)),
+                normalize_numeric(entry.get("fid", 0)),
                 str(entry.get("violation_type") or entry.get("classification") or "unknown"),
                 str(entry.get("violation_detail") or entry.get("signature") or "none"),
             ]
@@ -43,6 +45,9 @@ def merge_buckets(entries: list[dict]) -> dict:
     buckets = {}
     for key, items in sorted(grouped.items()):
         rep = items[0]
+        default_seen = utc_now()
+        first_seen = sorted(str(item["first_seen"]) for item in items if item.get("first_seen"))
+        last_seen = sorted(str(item["last_seen"]) for item in items if item.get("last_seen"))
         hashes = []
         for item in items:
             hashes.extend(item.get("hashes", []))
@@ -60,14 +65,12 @@ def merge_buckets(entries: list[dict]) -> dict:
             "hashes": sorted(set(hashes)),
             "affected_target": rep.get("affected_target"),
             "impact": impact_for_entry(rep),
-            "dedup_key": rep.get("dedup_key", key),
+            "dedup_key": rep.get("dedup_key") or key,
             "bug_id": rep.get("bug_id") or f"bug-{hashlib.sha256(key.encode()).hexdigest()[:12]}",
-            "repro_stability": rep.get(
-                "repro_stability",
-                {"attempts": 1, "label": "single_replay", "stable_ratio": 1.0},
-            ),
-            "first_seen": min(item.get("first_seen", utc_now()) for item in items),
-            "last_seen": max(item.get("last_seen", utc_now()) for item in items),
+            "repro_stability": rep.get("repro_stability")
+            or {"attempts": 1, "label": "single_replay", "stable_ratio": 1.0},
+            "first_seen": first_seen[0] if first_seen else default_seen,
+            "last_seen": last_seen[-1] if last_seen else default_seen,
         }
     return buckets
 

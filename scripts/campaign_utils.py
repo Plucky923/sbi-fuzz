@@ -166,6 +166,34 @@ def normalize_summary_target(summary: dict | None):
     return "unknown"
 
 
+def normalize_numeric(value) -> str:
+    if value is None:
+        return "0"
+    if isinstance(value, int):
+        return str(value)
+    text = str(value).strip()
+    try:
+        return str(int(text, 0))
+    except ValueError:
+        return text or "0"
+
+
+def canonicalize_host_triage_dedup_key(dedup_key) -> str:
+    dedup_key = str(dedup_key)
+    if dedup_key.count("|") < 4:
+        return dedup_key
+    target, eid, fid, classification, detail = dedup_key.split("|", 4)
+    return "|".join(
+        [
+            target,
+            normalize_numeric(eid),
+            normalize_numeric(fid),
+            classification,
+            detail,
+        ]
+    )
+
+
 def canonical_bug_id_from_legacy_bucket(summary: dict | None, key: str, bucket: dict):
     dedup_key = bucket.get("dedup_key")
     if not dedup_key:
@@ -173,6 +201,8 @@ def canonical_bug_id_from_legacy_bucket(summary: dict | None, key: str, bucket: 
         classification = bucket.get("classification", "unknown")
         signature = bucket.get("signature") or bucket.get("raw_signature") or bucket.get("violation_detail") or key
         dedup_key = f"{affected_target}|{classification}|{signature}"
+    elif summary and summary.get("report_type") == "host_triage":
+        dedup_key = canonicalize_host_triage_dedup_key(dedup_key)
     return f"bug-{hashlib.sha256(str(dedup_key).encode()).hexdigest()[:12]}"
 
 
@@ -180,23 +210,16 @@ def bug_id_from_bucket(summary: dict | None, key: str, bucket: dict):
     if bucket.get("bug_id"):
         return str(bucket["bug_id"])
     dedup_key = bucket.get("dedup_key")
-    if not dedup_key:
+    if dedup_key and summary and summary.get("report_type") == "host_triage":
+        dedup_key = canonicalize_host_triage_dedup_key(dedup_key)
+    elif not dedup_key:
         if (
             summary
             and summary.get("report_type") == "host_triage"
             and "|" in str(key)
             and str(key).count("|") >= 4
         ):
-            target, eid, fid, classification, detail = str(key).split("|", 4)
-            dedup_key = "|".join(
-                [
-                    target,
-                    str(int(str(eid), 0)),
-                    str(int(str(fid), 0)),
-                    classification,
-                    detail,
-                ]
-            )
+            dedup_key = canonicalize_host_triage_dedup_key(key)
             return f"bug-{hashlib.sha256(dedup_key.encode()).hexdigest()[:12]}"
         affected_target = bucket.get("affected_target") or bucket.get("target_kind")
         if not affected_target:
@@ -204,8 +227,8 @@ def bug_id_from_bucket(summary: dict | None, key: str, bucket: dict):
         dedup_key = "|".join(
             [
                 str(affected_target or "unknown"),
-                str(bucket.get("eid", 0)),
-                str(bucket.get("fid", 0)),
+                normalize_numeric(bucket.get("eid", 0)),
+                normalize_numeric(bucket.get("fid", 0)),
                 str(bucket.get("classification") or bucket.get("violation_type") or "unknown"),
                 str(bucket.get("violation_detail") or bucket.get("raw_signature") or bucket.get("signature") or key),
             ]
@@ -233,7 +256,7 @@ def previous_bug_ids(summary: dict | None, summary_path: Path | None = None):
             if not bug_json_path.is_absolute() and summary_path:
                 bug_json_path = (summary_path.parent / bug_json_path).resolve()
             if bug_json_path.exists():
-                current_ids = bug_ids_from_summary(json.loads(bug_json_path.read_text()), summary)
+                current_ids = bug_ids_from_summary(load_optional_json(bug_json_path), summary)
             else:
                 current_ids = []
         else:

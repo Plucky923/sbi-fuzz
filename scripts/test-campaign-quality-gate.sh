@@ -42,7 +42,6 @@ cat > "$previous_triage_json" <<'JSON'
   "buckets": {
     "rustsbi|0x10|0x0|memory_violation|old": {
       "affected_target": "rustsbi",
-      "bug_id": "bug-old",
       "classification": "crash",
       "dedup_key": "rustsbi|0x10|0x0|memory_violation|old",
       "first_seen": "2026-03-19T00:00:00Z",
@@ -87,9 +86,8 @@ cat > "$triage_json" <<'JSON'
   "buckets": {
     "rustsbi|0x10|0x0|memory_violation|old": {
       "affected_target": "rustsbi",
-      "bug_id": "bug-old",
       "classification": "crash",
-      "dedup_key": "rustsbi|0x10|0x0|memory_violation|old",
+      "dedup_key": "rustsbi|16|0|memory_violation|old",
       "first_seen": "2026-03-19T00:00:00Z",
       "impact": "crash",
       "last_seen": "2026-03-20T01:00:00Z",
@@ -188,9 +186,20 @@ python3 "$repo_root/scripts/validate-report-artifacts.py" "$gate_json" --kind qu
 
 rg -n '"status": "fail"' "$gate_json" >/dev/null
 rg -n '"code": "new_high_severity_bugs"' "$gate_json" >/dev/null
-rg -n '"bug-new-crash"' "$gate_json" >/dev/null
 rg -n '"code": "reopened_bugs"' "$gate_json" >/dev/null
 rg -n '"bug-.*"' "$gate_json" >/dev/null
 rg -n '"code": "high_hang_bucket_ratio"' "$gate_json" >/dev/null
+python3 - "$gate_json" <<'PY'
+import json
+import sys
+
+report = json.loads(open(sys.argv[1]).read())
+for blocker in report["blockers"]:
+    if blocker["code"] == "new_high_severity_bugs":
+        assert blocker["bug_ids"] == ["bug-new-crash"], blocker
+        break
+else:
+    raise AssertionError("new_high_severity_bugs blocker missing")
+PY
 
 echo "campaign quality gate test passed"

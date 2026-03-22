@@ -103,6 +103,30 @@ python3 "$repo_root/scripts/run-sbi-fuzz-campaign.py" \
   --json-out "$tmp_dir/bad-summary.json" >/dev/null
 rg -n '"finding_sets":' "$tmp_dir/bad-summary.json" >/dev/null
 
+bad_bug_json="$tmp_dir/bad-bugs.json"
+printf '{bad json\n' > "$bad_bug_json"
+bad_bug_summary="$tmp_dir/bad-bug-summary.json"
+cat > "$bad_bug_summary" <<JSON
+{
+  "artifacts": {
+    "bug_json": "$bad_bug_json"
+  }
+}
+JSON
+
+python3 "$repo_root/scripts/run-sbi-fuzz-campaign.py" \
+  smoke-profile \
+  "$target_bin" \
+  "$injector_elf" \
+  "$seed_dir" \
+  "$result_dir" \
+  --profile single-hart-fast \
+  --fuzzer-bin /bin/true \
+  --helper-bin /bin/true \
+  --previous-summary "$bad_bug_summary" \
+  --json-out "$tmp_dir/bad-bug-summary-output.json" >/dev/null
+rg -n '"finding_sets":' "$tmp_dir/bad-bug-summary-output.json" >/dev/null
+
 prev_sequence_summary="$tmp_dir/prev-sequence-summary.json"
 cat > "$prev_sequence_summary" <<JSON
 {

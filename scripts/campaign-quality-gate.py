@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 import argparse
-import hashlib
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -54,21 +53,8 @@ def make_check(actual, threshold, op: str) -> dict:
     }
 
 
-def current_bug_id_from_bucket(bucket: dict) -> str:
-    if bucket.get("bug_id"):
-        return str(bucket["bug_id"])
-    dedup_key = bucket.get("dedup_key")
-    if not dedup_key:
-        dedup_key = "|".join(
-            [
-                str(bucket.get("affected_target") or bucket.get("target_kind") or "unknown"),
-                str(bucket.get("eid", 0)),
-                str(bucket.get("fid", 0)),
-                str(bucket.get("classification") or bucket.get("violation_type") or "unknown"),
-                str(bucket.get("violation_detail") or bucket.get("signature") or "none"),
-            ]
-        )
-    return f"bug-{hashlib.sha256(dedup_key.encode()).hexdigest()[:12]}"
+def current_bug_id_from_bucket(summary: dict, key: str, bucket: dict) -> str:
+    return shared_bug_id_from_bucket(summary, key, bucket)
 
 
 def bucket_impact(bucket: dict) -> str:
@@ -87,8 +73,11 @@ def bucket_impact(bucket: dict) -> str:
 def summarize_triage(data: dict) -> dict:
     results = data.get("results", [])
     buckets = data.get("buckets", {})
-    bucket_items = list(buckets.values()) if isinstance(buckets, dict) else []
-    bug_index = {current_bug_id_from_bucket(bucket): bucket for bucket in bucket_items}
+    bucket_items = list(buckets.items()) if isinstance(buckets, dict) else []
+    bug_index = {
+        current_bug_id_from_bucket(data, key, bucket): bucket
+        for key, bucket in bucket_items
+    }
     hang_bug_ids = sorted(
         bug_id
         for bug_id, bucket in bug_index.items()
