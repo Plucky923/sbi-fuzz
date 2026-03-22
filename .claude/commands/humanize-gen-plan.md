@@ -8,6 +8,7 @@ allowed-tools:
   - "Grep"
   - "Task"
   - "Write"
+  - "Edit"
   - "AskUserQuestion"
 hide-from-slash-command-tool: "true"
 ---

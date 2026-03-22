@@ -33,7 +33,7 @@ def write_markdown(summary: dict, output: Path, label: str) -> None:
 
 def is_bug_bucket(bucket: dict) -> bool:
     classification = str(bucket.get("classification") or "").strip().lower()
-    impact = str(bucket.get("impact") or "").strip().lower()
+    impact = str(bucket.get("impact") or bucket.get("classification") or "").strip().lower()
     if classification in {"", "ok", "match"}:
         return False
     if impact in {"", "ok"}:

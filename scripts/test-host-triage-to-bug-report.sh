@@ -17,7 +17,6 @@ cat > "$triage_json" <<'JSON'
       "eid": 16,
       "fid": 1,
       "first_seen": "2026-03-20T00:00:00Z",
-      "impact": "ok",
       "last_seen": "2026-03-20T00:00:00Z",
       "repro_stability": {
         "attempts": 1,
@@ -37,7 +36,6 @@ cat > "$triage_json" <<'JSON'
       "eid": 16,
       "fid": 0,
       "first_seen": "2026-03-20T00:00:00Z",
-      "impact": "spec_violation",
       "last_seen": "2026-03-20T00:00:00Z",
       "repro_stability": {
         "attempts": 1,
