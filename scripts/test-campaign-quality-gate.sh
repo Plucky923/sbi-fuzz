@@ -202,4 +202,14 @@ else:
     raise AssertionError("new_high_severity_bugs blocker missing")
 PY
 
+pass_json="$out_dir/quality-gate-no-baseline.json"
+python3 "$repo_root/scripts/campaign-quality-gate.py" \
+  --metrics "$metrics_json" \
+  --triage "$triage_json" \
+  --json-out "$pass_json" > "$out_dir/stdout-no-baseline.json"
+
+python3 "$repo_root/scripts/validate-report-artifacts.py" "$pass_json" --kind quality-gate >/dev/null
+rg -n '"status": "pass"' "$pass_json" >/dev/null
+! rg -n '"code": "new_high_severity_bugs"' "$pass_json" >/dev/null
+
 echo "campaign quality gate test passed"

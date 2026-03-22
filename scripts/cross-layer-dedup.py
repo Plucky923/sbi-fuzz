@@ -61,6 +61,21 @@ def dedup_key_for_item(source: str, item: dict, report_type: str | None = None) 
                     detail,
                 ]
             )
+        if report_type == "bug_report":
+            target = normalize_target(
+                item.get("affected_target") or item.get("target_kind") or item.get("impl_kind") or source
+            )
+            classification = item.get("classification") or item.get("violation_type") or item.get("violation") or "unknown"
+            detail = item.get("raw_signature") or item.get("violation_detail") or item.get("signature") or "none"
+            return "|".join(
+                [
+                    target,
+                    normalize_numeric(item.get("eid", 0)),
+                    normalize_numeric(item.get("fid", 0)),
+                    classification,
+                    detail,
+                ]
+            )
         return dedup_key
     target = normalize_target(item.get("affected_target") or item.get("target_kind") or item.get("impl_kind") or source)
     eid = normalize_numeric(item.get("eid", 0))

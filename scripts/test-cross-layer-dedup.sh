@@ -12,11 +12,11 @@ cat > "$host_json" <<'JSON'
   "generated_at_utc": "2026-03-20T00:00:00Z",
   "report_type": "host_triage",
   "buckets": {
-    "rustsbi|0x10|0x0|memory_violation|same-root-cause": {
+    "rustsbi|0x10|0x0|crash|same-root-cause": {
       "affected_target": "rustsbi",
       "bug_id": "bug-host",
       "classification": "crash",
-      "dedup_key": "rustsbi|crash|semantic:same-root-cause",
+      "dedup_key": "rustsbi|16|0|crash|same-root-cause",
       "eid": 16,
       "fid": 0,
       "first_seen": "2026-03-20T00:00:00Z",
@@ -24,6 +24,7 @@ cat > "$host_json" <<'JSON'
       "last_seen": "2026-03-20T00:00:00Z",
       "reproducer": "host-case.host",
       "violation_detail": "same-root-cause",
+      "violation_type": "crash",
       "repro_stability": {
         "attempts": 1,
         "label": "single_replay",
@@ -53,6 +54,7 @@ cat > "$bug_json" <<'JSON'
       "impact": "crash",
       "input": "system-case.exec",
       "last_seen": "2026-03-20T01:00:00Z",
+      "signature": "same-root-cause",
       "raw_signature": "same-root-cause",
       "repro_stability": {
         "attempts": 1,

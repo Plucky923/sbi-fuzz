@@ -169,7 +169,7 @@ def main() -> int:
     new_bug_ids = sorted(current_bug_ids - previous_bug_ids) if previous_triage else []
     new_high_severity_bug_ids = sorted(
         bug_id for bug_id in triage["high_severity_bug_ids"] if bug_id not in previous_bug_ids
-    ) if previous_triage else triage["high_severity_bug_ids"]
+    ) if previous_triage else []
     reopened_bug_ids = sorted(current_bug_ids & closed_bug_ids)
 
     if new_high_severity_bug_ids:
