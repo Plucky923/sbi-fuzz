@@ -202,12 +202,7 @@ fn push_ecall_diff(
     if field_is_known(policy, input.call.extid, input.call.fid, field) {
         return;
     }
-    if policy.ignore_unsupported_extension_diff
-        && ((field == "sbi_error"
-            && (opensbi == SbiError::NotSupported.code().to_string()
-                || rustsbi == SbiError::NotSupported.code().to_string()))
-            || (field == "extension_found" && (opensbi == "false" || rustsbi == "false")))
-    {
+    if should_ignore_unsupported_diff(policy, input, field, &opensbi, &rustsbi) {
         return;
     }
     if value_field && should_ignore_value_diff(policy, input) {
@@ -243,6 +238,38 @@ fn should_ignore_value_diff(policy: &DiffPolicy, input: &HostHarnessInput) -> bo
             (input.call.extid, input.call.fid),
             (0x10, 1 | 2 | 3) | (0x504d55, _)
         )
+}
+
+fn should_ignore_unsupported_diff(
+    policy: &DiffPolicy,
+    input: &HostHarnessInput,
+    field: &str,
+    opensbi: &str,
+    rustsbi: &str,
+) -> bool {
+    if !policy.ignore_unsupported_extension_diff || is_known_extension(input.call.extid) {
+        return false;
+    }
+
+    (field == "sbi_error"
+        && (opensbi == SbiError::NotSupported.code().to_string()
+            || rustsbi == SbiError::NotSupported.code().to_string()))
+        || (field == "extension_found" && (opensbi == "false" || rustsbi == "false"))
+}
+
+fn is_known_extension(extid: u64) -> bool {
+    matches!(
+        extid,
+        0x0..=0xF
+            | 0x10
+            | 0x5449_4d45
+            | 0x735049
+            | 0x5246_4e43
+            | 0x4853_4d
+            | 0x4442_434e
+            | 0x5352_5354
+            | 0x504d55
+    )
 }
 
 fn field_is_known(policy: &DiffPolicy, eid: u64, fid: u64, field: &str) -> bool {

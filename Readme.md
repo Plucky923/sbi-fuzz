@@ -419,7 +419,7 @@ Example test cases for OpenSBI and RustSBI are provided in the `playground` dire
 
 ## Roadmap
 
-See `docs/plan.md` for the current repository-scoped implementation plan.
+See `docs/runbook.md` for the current repository-scoped workflow guide.
 
 See `docs/runbook.md` for the supported S0-S4 workflows, expected artifacts, and escalation paths.
 

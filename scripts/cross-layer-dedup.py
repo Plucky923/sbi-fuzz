@@ -100,6 +100,29 @@ def bug_id_for_key(dedup_key: str) -> str:
     return f"bug-{hashlib.sha256(dedup_key.encode()).hexdigest()[:12]}"
 
 
+def choose_best_reproducer(paths: list[str]) -> str | None:
+    candidates = [path for path in paths if path]
+    if not candidates:
+        return None
+    return min(candidates, key=lambda path: (len(path), path))
+
+
+def summarize_source_reproducers(items: list[dict]) -> dict[str, str]:
+    grouped: dict[str, list[str]] = defaultdict(list)
+    for item in items:
+        for reproducer in item.get("reproducers", []):
+            if reproducer:
+                grouped[item["source"]].append(reproducer)
+    return {
+        source: best
+        for source, best in (
+            (source, choose_best_reproducer(paths))
+            for source, paths in sorted(grouped.items())
+        )
+        if best
+    }
+
+
 def extract_source_items(source: str, data: dict) -> list[dict]:
     report_type = data.get("report_type")
     if isinstance(data.get("buckets"), dict):
@@ -139,14 +162,31 @@ def extract_source_items(source: str, data: dict) -> list[dict]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Cross-layer deduplicate host/sequence/QEMU reports")
-    parser.add_argument("inputs", nargs="+", type=Path)
+    parser.add_argument("inputs", nargs="*", type=Path)
+    parser.add_argument(
+        "--source",
+        action="append",
+        default=[],
+        help="Explicit source label and path in the form label=path",
+    )
     parser.add_argument("--json-out", type=Path)
     args = parser.parse_args()
 
     grouped: dict[str, list[dict]] = defaultdict(list)
-    for path in args.inputs:
+    explicit_sources: list[tuple[str, Path]] = []
+    for item in args.source:
+        if "=" not in item:
+            raise SystemExit(f"invalid --source value {item!r}; expected label=path")
+        label, raw_path = item.split("=", 1)
+        explicit_sources.append((label, Path(raw_path)))
+
+    inputs = explicit_sources or [(path.stem, path) for path in args.inputs]
+    if not inputs:
+        raise SystemExit("no input reports provided")
+
+    for source, path in inputs:
         data = json.loads(path.read_text())
-        for item in extract_source_items(path.stem, data):
+        for item in extract_source_items(source, data):
             grouped[item["dedup_key"]].append(item)
 
     summary = {
@@ -173,6 +213,7 @@ def main() -> int:
                     (item["last_seen"] for item in items if item.get("last_seen")),
                     default=None,
                 ),
+                "source_reproducers": summarize_source_reproducers(items),
                 "reproducers": sorted(
                     {
                         reproducer

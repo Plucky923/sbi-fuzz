@@ -61,6 +61,21 @@ test-campaign-quality-gate:
 test-cross-layer-dedup:
 	@bash ./scripts/test-cross-layer-dedup.sh
 
+test-collect-metrics:
+	@./scripts/test-collect-metrics.sh
+
+test-triage-host-fuzz-results:
+	@./scripts/test-triage-host-fuzz-results.sh
+
+test-minimize-spec-violation:
+	@./scripts/test-minimize-spec-violation.sh
+
+test-default-cross-layer-dedup:
+	@./scripts/test-default-cross-layer-dedup.sh
+
+test-default-collect-metrics:
+	@./scripts/test-default-collect-metrics.sh
+
 test-s0-workflow:
 	@bash ./scripts/test-s0-workflow.sh
 
@@ -80,7 +95,7 @@ triage-host-fuzz:
 	@python3 ./scripts/triage-host-fuzz-results.py ./output/host_fuzz/fuzz_ecall_rustsbi --json-out ./output/host_fuzz/triage.json --md-out ./output/host_fuzz/triage.md
 
 collect-metrics:
-	@python3 ./scripts/collect-metrics.py --log-dir ./output/host_fuzz/logs --json-out ./output/host_fuzz/metrics.json
+	@python3 ./scripts/collect-metrics.py --log-dir ./output/host_fuzz/logs --triage-json ./output/host_fuzz/triage.json --cross-layer-json ./output/host_fuzz/cross-layer.json --json-out ./output/host_fuzz/metrics.json
 
 quality-gate:
 	@python3 ./scripts/campaign-quality-gate.py --metrics ./output/host_fuzz/metrics.json --triage ./output/host_fuzz/triage.json --json-out ./output/host_fuzz/quality_gate.json
@@ -88,9 +103,7 @@ quality-gate:
 campaign-quality-gate: quality-gate
 
 cross-layer-dedup:
-	@INPUTS="./output/host_fuzz/triage.json"; \
-	if [ -f ./output/host_fuzz/opensbi.bugs.json ]; then INPUTS="$$INPUTS ./output/host_fuzz/opensbi.bugs.json"; fi; \
-	python3 ./scripts/cross-layer-dedup.py $$INPUTS --json-out ./output/host_fuzz/cross-layer.json
+	@./scripts/run-default-cross-layer-dedup.sh
 
 host-fuzz-corpus:
 	@./scripts/prepare-host-fuzz-corpus.sh
@@ -249,6 +262,11 @@ help:
 	@echo "  test-docs-check        - Verify docs validation catches stale links and bad make targets"
 	@echo "  test-campaign-quality-gate - Verify quality gate blockers and warnings from synthetic history"
 	@echo "  test-cross-layer-dedup - Verify stable bug IDs merge across host and system report inputs"
+	@echo "  test-collect-metrics   - Verify metrics aggregation from logs, triage, and cross-layer output"
+	@echo "  test-triage-host-fuzz-results - Verify host triage bucketing from regression artifacts"
+	@echo "  test-minimize-spec-violation - Verify spec-violation minimization removes irrelevant steps"
+	@echo "  test-default-cross-layer-dedup - Verify default cross-layer source discovery and grouping"
+	@echo "  test-default-collect-metrics - Verify default collect-metrics paths consume triage and cross-layer data"
 	@echo "  test-sequence-bug-report - Verify sequence bug reports satisfy the shared schema contract"
 	@echo "  test-campaign-summary-delta - Verify campaign summaries compute new/fixed/regressed/persisting finding sets"
 	@echo "  test-merge-host-triage - Verify merged host triage preserves crash severity semantics"
@@ -302,4 +320,4 @@ help:
 	@echo "  clean-generated        - Clean generated local samples and reports"
 	@echo "  help                   - Display this help message"
 
-.PHONY: all compile docs-check preflight-real preflight-fixture check-env check-env-smoke preflight test-common test-host-harness test-regression test-docs-check test-campaign-quality-gate test-cross-layer-dedup test-sequence-bug-report test-campaign-summary-delta test-merge-host-triage test-host-triage-to-bug-report test-s0-workflow test-linux-corpus-import test-opensbi-triage test-opensbi-replay test-opensbi-replay-summary test-opensbi-sanitizer-demo test-opensbi-coverage test-opensbi-bug-report test-rustsbi-scenarios test-rustsbi-replay test-rustsbi-helper-timeout test-rustsbi-collect-coverage-timeout test-rustsbi-hang-stability test-rustsbi-hang-minimize test-sbi-hang-semantic-buckets test-rustsbi-fuzz-finds-bug test-sequence-replay triage-host-fuzz collect-metrics quality-gate campaign-quality-gate cross-layer-dedup host-fuzz-corpus smoke-all host-fuzz-smoke host-fuzz-rustsbi host-fuzz-sequence host-fuzz-diff host-fuzz-diff-ecall host-fuzz-diff-sequence report-all host-fuzz-60 host-fuzz-60-complex sequence-seeds campaign-sequence-opensbi campaign-sequence-rustsbi campaign-opensbi campaign-rustsbi campaign-rustsbi-complex fuzzer helper injector clean clean-cargo clean-injector clean-playgrounds clean-generated help
+.PHONY: all compile docs-check preflight-real preflight-fixture check-env check-env-smoke preflight test-common test-host-harness test-regression test-docs-check test-campaign-quality-gate test-cross-layer-dedup test-collect-metrics test-triage-host-fuzz-results test-minimize-spec-violation test-default-cross-layer-dedup test-default-collect-metrics test-sequence-bug-report test-campaign-summary-delta test-merge-host-triage test-host-triage-to-bug-report test-s0-workflow test-linux-corpus-import test-opensbi-triage test-opensbi-replay test-opensbi-replay-summary test-opensbi-sanitizer-demo test-opensbi-coverage test-opensbi-bug-report test-rustsbi-scenarios test-rustsbi-replay test-rustsbi-helper-timeout test-rustsbi-collect-coverage-timeout test-rustsbi-hang-stability test-rustsbi-hang-minimize test-sbi-hang-semantic-buckets test-rustsbi-fuzz-finds-bug test-sequence-replay triage-host-fuzz collect-metrics quality-gate campaign-quality-gate cross-layer-dedup host-fuzz-corpus smoke-all host-fuzz-smoke host-fuzz-rustsbi host-fuzz-sequence host-fuzz-diff host-fuzz-diff-ecall host-fuzz-diff-sequence report-all host-fuzz-60 host-fuzz-60-complex sequence-seeds campaign-sequence-opensbi campaign-sequence-rustsbi campaign-opensbi campaign-rustsbi campaign-rustsbi-complex fuzzer helper injector clean clean-cargo clean-injector clean-playgrounds clean-generated help

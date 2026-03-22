@@ -35,6 +35,8 @@ pub enum HsmViolation {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HsmStateTracker {
     hart_states: Vec<HsmHartState>,
+    #[serde(default)]
+    active_hart: u64,
 }
 
 impl HsmStateTracker {
@@ -42,18 +44,40 @@ impl HsmStateTracker {
         let smp = smp.max(1);
         let mut hart_states = vec![HsmHartState::Stopped; smp as usize];
         hart_states[0] = HsmHartState::Started;
-        Self { hart_states }
+        Self {
+            hart_states,
+            active_hart: 0,
+        }
     }
 
     pub fn with_states(hart_states: Vec<HsmHartState>) -> Self {
-        Self { hart_states }
+        Self {
+            hart_states,
+            active_hart: 0,
+        }
     }
 
     pub fn hart_state(&self, hart_id: u64) -> Option<HsmHartState> {
         self.hart_states.get(hart_id as usize).copied()
     }
 
+    pub fn active_hart(&self) -> u64 {
+        self.active_hart
+    }
+
+    pub fn select_hart(&mut self, hart_id: u64) {
+        self.active_hart = hart_id;
+    }
+
+    pub fn set_hart_state(&mut self, hart_id: u64, state: HostHartState) {
+        self.apply_explicit_state(hart_id, state);
+    }
+
     pub fn update(&mut self, step: &SequenceStep, report: &HostHarnessReport) {
+        if let SequenceStep::SetTargetHart { hart_id } = step {
+            self.active_hart = *hart_id;
+            return;
+        }
         if let SequenceStep::SetHartState { hart_id, state } = step {
             self.apply_explicit_state(*hart_id, *state);
             return;
@@ -78,12 +102,12 @@ impl HsmStateTracker {
                     }
                 }
                 1 => {
-                    if let Some(state) = self.hart_states.get_mut(0) {
+                    if let Some(state) = self.hart_states.get_mut(self.active_hart as usize) {
                         *state = HsmHartState::Stopped;
                     }
                 }
                 3 => {
-                    if let Some(state) = self.hart_states.get_mut(0) {
+                    if let Some(state) = self.hart_states.get_mut(self.active_hart as usize) {
                         *state = HsmHartState::Suspended;
                     }
                 }

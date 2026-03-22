@@ -168,6 +168,23 @@ fn hsm_start_on_started_hart_requires_already_available() {
 }
 
 #[test]
+fn hsm_start_invalid_hart_is_rejected() {
+    let input = sample_input(0x4853_4d, 0, [64, 0, 0, 0, 0, 0]);
+    let report = sample_report(0x4853_4d, 0, SbiError::Success.code(), 0);
+    let violations = check_ecall_result(&input, &report);
+    assert!(matches!(
+        violations.as_slice(),
+        [SpecViolation::WrongErrorCode {
+            expected,
+            got,
+            context
+        }, ..] if *expected == SbiError::InvalidParam.code()
+            && *got == SbiError::Success.code()
+            && context.contains("hart_start")
+    ));
+}
+
+#[test]
 fn hsm_stop_on_stopped_hart_is_illegal_transition() {
     let mut input = sample_input(0x4853_4d, 1, [0; 6]);
     input.hart_state = HostHartState::Stopped;
@@ -176,6 +193,24 @@ fn hsm_stop_on_stopped_hart_is_illegal_transition() {
     assert!(matches!(
         violations.as_slice(),
         [SpecViolation::HsmIllegalTransition { .. }]
+    ));
+}
+
+#[test]
+fn hsm_suspend_invalid_type_is_rejected_even_from_started_state() {
+    let mut input = sample_input(0x4853_4d, 3, [0x2, 0, 0, 0, 0, 0]);
+    input.hart_state = HostHartState::Started;
+    let report = sample_report(0x4853_4d, 3, SbiError::Success.code(), 0);
+    let violations = check_ecall_result(&input, &report);
+    assert!(matches!(
+        violations.as_slice(),
+        [SpecViolation::WrongErrorCode {
+            expected,
+            got,
+            context
+        }] if *expected == SbiError::InvalidParam.code()
+            && *got == SbiError::Success.code()
+            && context.contains("hart_suspend")
     ));
 }
 
@@ -200,11 +235,14 @@ fn active_platform_fault_profile_skips_spec_checks() {
 }
 
 #[test]
-fn ipi_nonzero_mask_is_not_enforced_in_host_model() {
+fn ipi_invalid_hart_mask_member_is_rejected() {
     let input = sample_input(0x7350_49, 0, [0b0001_0000, 60, 0, 0, 0, 0]);
     let report = sample_report(0x7350_49, 0, SbiError::Success.code(), 0);
     let violations = check_ecall_result(&input, &report);
-    assert!(violations.is_empty());
+    assert!(matches!(
+        violations.as_slice(),
+        [SpecViolation::HartMaskInvalidNotRejected { hart_id: 64 }]
+    ));
 }
 
 #[test]
@@ -216,11 +254,14 @@ fn ipi_empty_mask_is_accepted() {
 }
 
 #[test]
-fn rfence_nonzero_mask_is_not_enforced_in_host_model() {
+fn rfence_invalid_hart_mask_member_is_rejected() {
     let input = sample_input(0x5246_4e43, 1, [1, 64, 0x8000_1000, 0x1000, 0, 0]);
     let report = sample_report(0x5246_4e43, 1, SbiError::Success.code(), 0);
     let violations = check_ecall_result(&input, &report);
-    assert!(violations.is_empty());
+    assert!(matches!(
+        violations.as_slice(),
+        [SpecViolation::HartMaskInvalidNotRejected { hart_id: 64 }]
+    ));
 }
 
 #[test]
@@ -281,5 +322,22 @@ fn pmu_snapshot_invalid_address_is_rejected() {
     assert!(matches!(
         violations.as_slice(),
         [SpecViolation::InvalidAddressNotRejected { .. }]
+    ));
+}
+
+#[test]
+fn pmu_snapshot_invalid_address_requires_invalid_param_error() {
+    let input = sample_input(0x504d_55, 7, [0x8000_3000, 0, 0, 0, 0, 0]);
+    let report = sample_report(0x504d_55, 7, SbiError::Failed.code(), 0);
+    let violations = check_ecall_result(&input, &report);
+    assert!(matches!(
+        violations.as_slice(),
+        [SpecViolation::WrongErrorCode {
+            expected,
+            got,
+            context
+        }] if *expected == SbiError::InvalidParam.code()
+            && *got == SbiError::Failed.code()
+            && context.contains("snapshot_set_shmem")
     ));
 }

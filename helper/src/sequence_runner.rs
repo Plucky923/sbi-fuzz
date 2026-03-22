@@ -1,8 +1,8 @@
 use common::{
     HostCall, HostHarnessInput, HostHarnessMode, HostHartState, HostMemoryRegion,
     HostPlatformFaultProfile, HostPrivilegeState, HostTargetKind,
-    MemoryOracle, SequenceArg, SequenceFdtExpectation, SequenceMemoryObject, SequenceProgram,
-    SequenceStep, check_host_report, generate_seed_variants,
+    DiffPolicy, HsmOp, HsmStateTracker, MemoryOracle, SequenceArg, SequenceFdtExpectation,
+    SequenceMemoryObject, SequenceProgram, SequenceStep, check_host_report, generate_seed_variants,
     sequence_memory_guest_addr, sequence_program_describe, sequence_program_from_bytes,
     sequence_program_from_exec, sequence_program_from_semantic_input,
     sequence_program_from_toml_input, sequence_program_semantic_signature, sequence_program_to_bytes,
@@ -18,6 +18,8 @@ pub struct SequenceStepReport {
     pub index: usize,
     pub kind: String,
     pub label: String,
+    pub eid: Option<u64>,
+    pub fid: Option<u64>,
     pub classification: String,
     pub signature: String,
     pub expectation_ok: bool,
@@ -503,15 +505,18 @@ fn detect_sequence_violation(
     impl_kind: HostTargetKind,
 ) -> Result<Option<SequenceViolationSummary>, String> {
     let mut state = SequenceExecutionState::new(program);
+    let mut hsm_tracker = HsmStateTracker::new(program.env.smp);
     let memory_map = memory_map(program);
 
     for (index, step) in program.steps.iter().enumerate() {
         match step {
             SequenceStep::SetTargetHart { hart_id } => {
                 state.active_hart = *hart_id;
+                hsm_tracker.select_hart(*hart_id);
             }
             SequenceStep::SetHartState { hart_id, state: hart_state } => {
                 state.hart_states.insert(*hart_id, *hart_state);
+                hsm_tracker.set_hart_state(*hart_id, *hart_state);
             }
             SequenceStep::SetPrivilege { privilege } => {
                 state.privilege = *privilege;
@@ -578,9 +583,19 @@ fn detect_sequence_violation(
                         detail: format!("{violation:?}"),
                     }));
                 }
+                if let Some(violation) = hsm_model_violation(&hsm_tracker, step, &report) {
+                    return Ok(Some(SequenceViolationSummary {
+                        kind: "model".to_string(),
+                        signature: format!("model:{violation}"),
+                        step_index: index,
+                        step_kind: "call".to_string(),
+                        detail: violation,
+                    }));
+                }
                 if !report.post_memory_regions.is_empty() {
                     state.memory_regions = report.post_memory_regions.clone();
                 }
+                hsm_tracker.update(step, &report);
                 update_call_state(&mut state, *eid, *fid, &values, &report);
             }
             SequenceStep::ParseFdt { label, object, .. } => {
@@ -619,6 +634,50 @@ fn detect_sequence_violation(
     }
 
     Ok(None)
+}
+
+fn hsm_model_violation(
+    tracker: &HsmStateTracker,
+    step: &SequenceStep,
+    report: &HostHarnessReport,
+) -> Option<String> {
+    let HostHarnessResult::Ecall(ecall) = &report.result else {
+        return None;
+    };
+    let SequenceStep::Call { eid, fid, args, .. } = step else {
+        return None;
+    };
+    if *eid != 0x4853_4d {
+        return None;
+    }
+
+    let target_hart = match *fid {
+        0 | 2 => constant_arg(args.first())?,
+        1 | 3 => tracker.active_hart(),
+        _ => return None,
+    };
+    let op = match *fid {
+        0 => HsmOp::HartStart,
+        1 => HsmOp::HartStop,
+        2 => HsmOp::HartGetStatus,
+        3 => HsmOp::HartSuspend,
+        _ => return None,
+    };
+    let expected = tracker.expected_outcomes(op, target_hart);
+    if expected.contains(&ecall.sbi_error) {
+        return None;
+    }
+    Some(format!(
+        "unexpected hsm outcome eid=0x{:x} fid=0x{:x} target_hart={} got={} expected={expected:?}",
+        eid, fid, target_hart, ecall.sbi_error
+    ))
+}
+
+fn constant_arg(arg: Option<&SequenceArg>) -> Option<u64> {
+    match arg {
+        Some(SequenceArg::Const { value }) => Some(*value),
+        _ => None,
+    }
 }
 
 fn materialize_arg(
@@ -687,6 +746,8 @@ fn state_only_step(
         index,
         kind: kind.to_string(),
         label,
+        eid: None,
+        fid: None,
         classification: "ok".to_string(),
         signature: state.state_signature(),
         expectation_ok: true,
@@ -760,6 +821,14 @@ fn call_step_report(
         } else {
             label.to_string()
         },
+        eid: Some(match &host_report.result {
+            HostHarnessResult::Ecall(report) => report.extid,
+            HostHarnessResult::Fdt(_) => 0,
+        }),
+        fid: Some(match &host_report.result {
+            HostHarnessResult::Ecall(report) => report.fid,
+            HostHarnessResult::Fdt(_) => 0,
+        }),
         classification: classification.clone(),
         signature,
         expectation_ok,
@@ -823,6 +892,8 @@ fn fdt_step_report(
         } else {
             label.to_string()
         },
+        eid: None,
+        fid: None,
         classification: classification.clone(),
         signature,
         expectation_ok,
@@ -908,6 +979,7 @@ fn diff_sequence_reports(
     opensbi: SequenceRunReport,
     rustsbi: SequenceRunReport,
 ) -> SequenceDiffReport {
+    let policy = DiffPolicy::default();
     let mut compared_steps = 0_usize;
     let mut mismatches = Vec::new();
     for (left, right) in opensbi.steps.iter().zip(rustsbi.steps.iter()) {
@@ -940,11 +1012,18 @@ fn diff_sequence_reports(
                 continue;
             }
             compared_steps += 1;
+            let ignore_value_diff =
+                left.value != right.value && should_ignore_sequence_value_diff(&policy, left, right);
             let same = left.sbi_error == right.sbi_error
                 && left.value == right.value
                 && left.extension_found == right.extension_found
                 && left.fdt_status == right.fdt_status
                 && left.fdt_hart_count == right.fdt_hart_count;
+            let same = same || (ignore_value_diff
+                && left.sbi_error == right.sbi_error
+                && left.extension_found == right.extension_found
+                && left.fdt_status == right.fdt_status
+                && left.fdt_hart_count == right.fdt_hart_count);
             if !same {
                 mismatches.push(SequenceMismatch {
                     index: left.index,
@@ -984,6 +1063,24 @@ fn diff_sequence_reports(
         opensbi,
         rustsbi,
     }
+}
+
+fn should_ignore_sequence_value_diff(
+    policy: &DiffPolicy,
+    left: &SequenceStepReport,
+    right: &SequenceStepReport,
+) -> bool {
+    if left.eid != right.eid || left.fid != right.fid {
+        return false;
+    }
+    let Some(eid) = left.eid else {
+        return false;
+    };
+    let fid = left.fid.unwrap_or(0);
+    if policy.error_code_only_eids.contains(&eid) {
+        return true;
+    }
+    policy.ignore_impl_defined_value && matches!((eid, fid), (0x504d55, _))
 }
 
 fn write_sequence_seed(output: &PathBuf, program: &SequenceProgram) -> Result<(), String> {
@@ -1335,8 +1432,8 @@ fn impl_name(kind: HostTargetKind) -> &'static str {
 mod tests {
     use super::*;
     use common::{
-        HostCall, HostHarnessMode, HostHartState, HostMemoryRegion, HostPlatformFaultMode,
-        HostPlatformFaultProfile, HostPrivilegeState, SequenceArg, SequenceEnv,
+        HostCall, HostEcallReport, HostHarnessMode, HostHartState, HostMemoryRegion,
+        HostPlatformFaultMode, HostPlatformFaultProfile, HostPrivilegeState, SequenceArg, SequenceEnv,
         SequenceMemoryObject, SequenceMetadata, SequenceProgram, SequenceStep,
     };
 
@@ -1360,6 +1457,8 @@ mod tests {
             index: 0,
             kind: "call".to_string(),
             label: "base-get-spec-version".to_string(),
+            eid: Some(0x10),
+            fid: Some(0),
             classification: "ok".to_string(),
             signature: "sig".to_string(),
             expectation_ok: true,
@@ -1399,6 +1498,63 @@ mod tests {
             memory_signature: "mem".to_string(),
             semantic_signature: "semantic".to_string(),
             steps: vec![step],
+        };
+        let diff = diff_sequence_reports("seq".to_string(), "shared".to_string(), opensbi, rustsbi);
+        assert_eq!(diff.classification, "match");
+    }
+
+    #[test]
+    fn diff_report_ignores_base_value_only_mismatch() {
+        let opensbi_step = SequenceStepReport {
+            index: 0,
+            kind: "call".to_string(),
+            label: "base-get-spec-version".to_string(),
+            eid: Some(0x10),
+            fid: Some(0),
+            classification: "ok".to_string(),
+            signature: "opensbi".to_string(),
+            expectation_ok: true,
+            interesting: false,
+            supported_by_target: Some(true),
+            sbi_error: Some(0),
+            value: Some(0x0300_0000),
+            extension_found: Some(true),
+            fdt_status: None,
+            fdt_hart_count: None,
+            state_signature: "state".to_string(),
+        };
+        let rustsbi_step = SequenceStepReport {
+            value: Some(0x0200_0000),
+            signature: "rustsbi".to_string(),
+            ..opensbi_step.clone()
+        };
+        let opensbi = SequenceRunReport {
+            impl_kind: HostTargetKind::OpenSbi,
+            input: "seq".to_string(),
+            name: "shared".to_string(),
+            classification: "ok".to_string(),
+            signature: "sig".to_string(),
+            interesting: false,
+            supported_by_target: true,
+            step_count: 1,
+            state_signature: "state".to_string(),
+            memory_signature: "mem".to_string(),
+            semantic_signature: "semantic".to_string(),
+            steps: vec![opensbi_step],
+        };
+        let rustsbi = SequenceRunReport {
+            impl_kind: HostTargetKind::RustSbi,
+            input: "seq".to_string(),
+            name: "shared".to_string(),
+            classification: "ok".to_string(),
+            signature: "sig".to_string(),
+            interesting: false,
+            supported_by_target: true,
+            step_count: 1,
+            state_signature: "state".to_string(),
+            memory_signature: "mem".to_string(),
+            semantic_signature: "semantic".to_string(),
+            steps: vec![rustsbi_step],
         };
         let diff = diff_sequence_reports("seq".to_string(), "shared".to_string(), opensbi, rustsbi);
         assert_eq!(diff.classification, "match");
@@ -1494,5 +1650,75 @@ mod tests {
         } else {
             panic!("expected ecall report");
         }
+    }
+
+    #[test]
+    fn hsm_model_violation_uses_active_hart_for_self_directed_ops() {
+        let mut tracker = HsmStateTracker::new(2);
+        tracker.select_hart(1);
+        tracker.set_hart_state(1, HostHartState::Started);
+        let step = SequenceStep::Call {
+            label: "stop".to_string(),
+            eid: 0x4853_4d,
+            fid: 1,
+            args: vec![SequenceArg::Const { value: 0 }; 6],
+            expect: None,
+        };
+        let report = HostHarnessReport {
+            target_kind: HostTargetKind::OpenSbi,
+            backend: "test".to_string(),
+            mode: HostHarnessMode::Ecall,
+            classification: "ok".to_string(),
+            signature: "ok".to_string(),
+            post_memory_regions: Vec::new(),
+            result: HostHarnessResult::Ecall(HostEcallReport {
+                extid: 0x4853_4d,
+                fid: 1,
+                sbi_error: 0,
+                sbi_error_name: Some("success".to_string()),
+                value: 0,
+                next_mepc: None,
+                extension_found: true,
+                side_effects: 0,
+                console_bytes: 0,
+                timer_value: 0,
+            }),
+        };
+        assert!(hsm_model_violation(&tracker, &step, &report).is_none());
+    }
+
+    #[test]
+    fn hsm_model_violation_reports_unexpected_success() {
+        let mut tracker = HsmStateTracker::new(2);
+        tracker.select_hart(1);
+        let step = SequenceStep::Call {
+            label: "suspend".to_string(),
+            eid: 0x4853_4d,
+            fid: 3,
+            args: vec![SequenceArg::Const { value: 0 }; 6],
+            expect: None,
+        };
+        let report = HostHarnessReport {
+            target_kind: HostTargetKind::OpenSbi,
+            backend: "test".to_string(),
+            mode: HostHarnessMode::Ecall,
+            classification: "ok".to_string(),
+            signature: "ok".to_string(),
+            post_memory_regions: Vec::new(),
+            result: HostHarnessResult::Ecall(HostEcallReport {
+                extid: 0x4853_4d,
+                fid: 3,
+                sbi_error: 0,
+                sbi_error_name: Some("success".to_string()),
+                value: 0,
+                next_mepc: None,
+                extension_found: true,
+                side_effects: 0,
+                console_bytes: 0,
+                timer_value: 0,
+            }),
+        };
+        let violation = hsm_model_violation(&tracker, &step, &report).expect("model violation");
+        assert!(violation.contains("target_hart=1"));
     }
 }

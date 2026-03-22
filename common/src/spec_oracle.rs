@@ -176,6 +176,31 @@ fn check_hsm_rules(
     report: &HostEcallReport,
     violations: &mut Vec<SpecViolation>,
 ) {
+    if input.call.fid == 0 && input.call.args[0] >= MAX_TRACKED_HARTS {
+        if report.sbi_error != SbiError::InvalidParam.code() {
+            violations.push(SpecViolation::WrongErrorCode {
+                expected: SbiError::InvalidParam.code(),
+                got: report.sbi_error,
+                context: format!(
+                    "hart_start should reject invalid hart {}",
+                    input.call.args[0]
+                ),
+            });
+        }
+    }
+
+    if input.call.fid == 3 {
+        let suspend_type = input.call.args[0];
+        let suspend_type_invalid = suspend_type & !0x8000_0000 != 0;
+        if suspend_type_invalid && report.sbi_error != SbiError::InvalidParam.code() {
+            violations.push(SpecViolation::WrongErrorCode {
+                expected: SbiError::InvalidParam.code(),
+                got: report.sbi_error,
+                context: "hart_suspend with invalid suspend_type".to_string(),
+            });
+        }
+    }
+
     match input.call.fid {
         0 if input.hart_state == HostHartState::Started => {
             if !matches!(
@@ -211,17 +236,6 @@ fn check_hsm_rules(
                 });
             }
         }
-        3 if input.hart_state != HostHartState::Started => {
-            let suspend_type = input.call.args[0];
-            let suspend_type_invalid = suspend_type & !0x8000_0000 != 0;
-            if suspend_type_invalid && report.sbi_error != SbiError::InvalidParam.code() {
-                violations.push(SpecViolation::WrongErrorCode {
-                    expected: SbiError::InvalidParam.code(),
-                    got: report.sbi_error,
-                    context: "hart_suspend with invalid suspend_type".to_string(),
-                });
-            }
-        }
         _ => {}
     }
 }
@@ -245,6 +259,24 @@ fn check_hart_mask_rules(
             });
         }
         return;
+    }
+
+    if let Some(invalid_hart_id) = first_invalid_hart_mask_member(input.call.args[0], hart_mask_base)
+    {
+        if report.sbi_error == SbiError::Success.code() {
+            violations.push(SpecViolation::HartMaskInvalidNotRejected {
+                hart_id: invalid_hart_id,
+            });
+        } else if report.sbi_error != SbiError::InvalidParam.code() {
+            violations.push(SpecViolation::WrongErrorCode {
+                expected: SbiError::InvalidParam.code(),
+                got: report.sbi_error,
+                context: format!(
+                    "hart mask should reject invalid hart {}",
+                    invalid_hart_id
+                ),
+            });
+        }
     }
 }
 
@@ -282,16 +314,25 @@ fn check_pmu_rules(
         7 => {
             let addr = join_split_address(input.call.args[0], input.call.args[1]);
             let len = 8;
-            if addr != 0
-                && !region_covers(&input.memory_regions, addr, len, true, false)
-                && report.sbi_error == SbiError::Success.code()
-            {
-                violations.push(SpecViolation::InvalidAddressNotRejected {
-                    eid: input.call.extid,
-                    fid: input.call.fid,
-                    addr,
-                    len,
-                });
+            let invalid_addr = addr != 0 && !region_covers(&input.memory_regions, addr, len, true, false);
+            if invalid_addr {
+                if report.sbi_error == SbiError::Success.code() {
+                    violations.push(SpecViolation::InvalidAddressNotRejected {
+                        eid: input.call.extid,
+                        fid: input.call.fid,
+                        addr,
+                        len,
+                    });
+                } else if report.sbi_error != SbiError::InvalidParam.code() {
+                    violations.push(SpecViolation::WrongErrorCode {
+                        expected: SbiError::InvalidParam.code(),
+                        got: report.sbi_error,
+                        context: format!(
+                            "pmu snapshot_set_shmem should reject invalid address 0x{:x}",
+                            addr
+                        ),
+                    });
+                }
             }
         }
         _ => {}
@@ -324,6 +365,27 @@ fn join_split_address(low: u64, high: u64) -> u64 {
     ((high & u64::from(u32::MAX)) << 32) | (low & u64::from(u32::MAX))
 }
 
+fn first_invalid_hart_mask_member(hart_mask: u64, hart_mask_base: u64) -> Option<u64> {
+    if hart_mask == 0 {
+        return None;
+    }
+
+    if hart_mask_base >= MAX_TRACKED_HARTS {
+        return Some(hart_mask_base);
+    }
+
+    for bit in 0..u64::BITS {
+        if (hart_mask >> bit) & 1 == 0 {
+            continue;
+        }
+        let hart_id = hart_mask_base.saturating_add(u64::from(bit));
+        if hart_id >= MAX_TRACKED_HARTS {
+            return Some(hart_id);
+        }
+    }
+
+    None
+}
 
 fn region_covers(
     regions: &[crate::HostMemoryRegion],

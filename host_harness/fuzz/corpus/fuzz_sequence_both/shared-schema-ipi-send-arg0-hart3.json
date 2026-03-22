@@ -8,7 +8,38 @@
     "smp": 4,
     "platform": ""
   },
-  "memory": [],
+  "memory": [
+    {
+      "id": "arg0_mem",
+      "slot_offset": 256,
+      "guest_addr": 8,
+      "read": true,
+      "write": true,
+      "execute": false,
+      "bytes": [
+        97,
+        114,
+        103,
+        48,
+        45,
+        115,
+        101,
+        109,
+        97,
+        110,
+        116,
+        105,
+        99,
+        45,
+        98,
+        117,
+        102,
+        102,
+        101,
+        114
+      ]
+    }
+  ],
   "steps": [
     {
       "kind": "set_target_hart",
@@ -25,8 +56,8 @@
       "fid": 0,
       "args": [
         {
-          "kind": "const",
-          "value": 8
+          "kind": "memory_addr",
+          "object": "arg0_mem"
         },
         {
           "kind": "const",

@@ -9,7 +9,7 @@ trap 'rm -f "$good_doc" "$bad_doc"' EXIT
 cat > "$good_doc" <<'MD'
 # Good Doc
 
-See `docs/runbook.md` and `docs/plan.md`.
+See `docs/runbook.md`.
 
 ```bash
 make preflight

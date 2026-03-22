@@ -82,3 +82,101 @@ fn pending_states_report_invalid_follow_up_operations() {
         vec![SbiError::InvalidState.code()]
     );
 }
+
+#[test]
+fn set_target_hart_redirects_successful_stop_updates() {
+    let mut tracker = HsmStateTracker::with_states(vec![
+        HsmHartState::Started,
+        HsmHartState::Started,
+    ]);
+    tracker.update(&SequenceStep::SetTargetHart { hart_id: 1 }, &success_report());
+    let step = SequenceStep::Call {
+        label: "stop".to_string(),
+        eid: 0x4853_4d,
+        fid: 1,
+        args: vec![
+            SequenceArg::Const { value: 0 },
+            SequenceArg::Const { value: 0 },
+            SequenceArg::Const { value: 0 },
+            SequenceArg::Const { value: 0 },
+            SequenceArg::Const { value: 0 },
+            SequenceArg::Const { value: 0 },
+        ],
+        expect: None,
+    };
+    tracker.update(&step, &success_report());
+    assert_eq!(tracker.hart_state(0), Some(HsmHartState::Started));
+    assert_eq!(tracker.hart_state(1), Some(HsmHartState::Stopped));
+}
+
+#[test]
+fn set_target_hart_redirects_successful_suspend_updates() {
+    let mut tracker = HsmStateTracker::with_states(vec![
+        HsmHartState::Started,
+        HsmHartState::Started,
+    ]);
+    tracker.update(&SequenceStep::SetTargetHart { hart_id: 1 }, &success_report());
+    let step = SequenceStep::Call {
+        label: "suspend".to_string(),
+        eid: 0x4853_4d,
+        fid: 3,
+        args: vec![
+            SequenceArg::Const { value: 0 },
+            SequenceArg::Const { value: 0 },
+            SequenceArg::Const { value: 0 },
+            SequenceArg::Const { value: 0 },
+            SequenceArg::Const { value: 0 },
+            SequenceArg::Const { value: 0 },
+        ],
+        expect: None,
+    };
+    tracker.update(&step, &success_report());
+    assert_eq!(tracker.hart_state(0), Some(HsmHartState::Started));
+    assert_eq!(tracker.hart_state(1), Some(HsmHartState::Suspended));
+}
+
+#[test]
+fn failed_hsm_calls_do_not_mutate_tracker_state() {
+    let mut tracker = HsmStateTracker::with_states(vec![
+        HsmHartState::Started,
+        HsmHartState::Started,
+    ]);
+    tracker.select_hart(1);
+    let step = SequenceStep::Call {
+        label: "stop".to_string(),
+        eid: 0x4853_4d,
+        fid: 1,
+        args: vec![
+            SequenceArg::Const { value: 0 },
+            SequenceArg::Const { value: 0 },
+            SequenceArg::Const { value: 0 },
+            SequenceArg::Const { value: 0 },
+            SequenceArg::Const { value: 0 },
+            SequenceArg::Const { value: 0 },
+        ],
+        expect: None,
+    };
+    let failed = HostHarnessReport {
+        target_kind: HostTargetKind::OpenSbi,
+        backend: "test".to_string(),
+        mode: HostHarnessMode::Ecall,
+        classification: "sbi_error:failed".to_string(),
+        signature: "failed".to_string(),
+        post_memory_regions: Vec::new(),
+        result: HostHarnessResult::Ecall(HostEcallReport {
+            extid: 0x4853_4d,
+            fid: 1,
+            sbi_error: SbiError::Failed.code(),
+            sbi_error_name: Some("failed".to_string()),
+            value: 0,
+            next_mepc: None,
+            extension_found: true,
+            side_effects: 0,
+            console_bytes: 0,
+            timer_value: 0,
+        }),
+    };
+    tracker.update(&step, &failed);
+    assert_eq!(tracker.hart_state(0), Some(HsmHartState::Started));
+    assert_eq!(tracker.hart_state(1), Some(HsmHartState::Started));
+}
