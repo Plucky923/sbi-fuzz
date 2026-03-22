@@ -12,6 +12,7 @@ sys.path.insert(0, str(repo_root / "scripts"))
 
 from campaign_utils import bug_id_from_bucket, bug_ids_from_summary, compute_finding_sets  # noqa: E402
 from campaign_utils import previous_bug_ids  # noqa: E402
+from sbi_results import summarize_bug_report  # noqa: E402
 
 current_bugs = {
     "buckets": {
@@ -43,12 +44,38 @@ legacy_bug_summary = {
 }
 current_ids, fixed_ids = previous_bug_ids(legacy_bug_summary, Path("legacy-summary.json"))
 expected_legacy = bug_id_from_bucket(
-    legacy_bug_summary,
+    {
+        "name": "rustsbi-prototyper",
+        "report_type": "bug_report",
+    },
     "legacy-firmware-signature",
     {"classification": "crash", "signature": "legacy-firmware-signature"},
 )
 assert current_ids == {expected_legacy}, current_ids
 assert fixed_ids == set(), fixed_ids
+
+current_bug_report = summarize_bug_report(
+    [
+        {
+            "actual": "Crash",
+            "classification": "crash",
+            "eid": "0x1",
+            "expected": "Timeout",
+            "fid": "0x2",
+            "hash": "abc",
+            "input": "case.exec",
+            "instruction_signature": "legacy-firmware-signature",
+            "interesting": True,
+            "notes": [],
+            "output_excerpt": "",
+            "signature": "legacy-firmware-signature",
+            "signals": [],
+            "trap": None,
+        }
+    ],
+    target_hint="rustsbi-prototyper",
+)
+assert [bucket["bug_id"] for bucket in current_bug_report["buckets"].values()] == [expected_legacy]
 PY
 
 tmp_dir="$(mktemp -d)"

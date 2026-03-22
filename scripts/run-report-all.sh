@@ -11,6 +11,7 @@ OPENSBI_TRIAGE_MD="$HOST_OUT_ROOT/opensbi.triage.md"
 OPENSBI_BUG_JSON="$HOST_OUT_ROOT/opensbi.bugs.json"
 OPENSBI_BUG_MD="$HOST_OUT_ROOT/opensbi.bugs.md"
 OPENSBI_BUG_STDOUT="$HOST_OUT_ROOT/opensbi.bugs.stdout.json"
+QUALITY_GATE_BASELINE_JSON="$HOST_OUT_ROOT/quality-gate-baseline.json"
 
 reset_dir() {
     local dir="$1"
@@ -65,12 +66,32 @@ generate_opensbi_bug_report() {
         > "$OPENSBI_BUG_STDOUT"
 }
 
+write_quality_gate_baseline() {
+    cat > "$QUALITY_GATE_BASELINE_JSON" <<'JSON'
+{
+  "schema_version": 1,
+  "generated_at_utc": "1970-01-01T00:00:00Z",
+  "report_type": "host_triage",
+  "total_cases": 0,
+  "results": [],
+  "by_violation_type": {},
+  "buckets": {}
+}
+JSON
+}
+
 run_quality_gate() {
     local gate_rc=0
+    local previous_triage_path="${SBIFUZZ_REPORT_PREVIOUS_TRIAGE:-}"
+    if [[ -z "$previous_triage_path" ]]; then
+        write_quality_gate_baseline
+        previous_triage_path="$QUALITY_GATE_BASELINE_JSON"
+    fi
     set +e
     python3 "$ROOT_DIR/scripts/campaign-quality-gate.py" \
         --metrics "$HOST_OUT_ROOT/metrics.json" \
         --triage "$HOST_OUT_ROOT/triage.json" \
+        --previous-triage "$previous_triage_path" \
         --min-total-runs "${SBIFUZZ_REPORT_MIN_TOTAL_RUNS:-0}" \
         --min-confirmed-ratio "${SBIFUZZ_REPORT_MIN_CONFIRMED_RATIO:-0}" \
         --min-peak-exec-per-sec "${SBIFUZZ_REPORT_MIN_PEAK_EXEC_PER_SEC:-0}" \

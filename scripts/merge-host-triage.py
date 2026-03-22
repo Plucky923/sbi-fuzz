@@ -27,7 +27,19 @@ def merge_buckets(entries: list[dict]) -> dict:
 
     def entry_dedup_key(entry: dict) -> str:
         if entry.get("dedup_key"):
-            return entry["dedup_key"]
+            dedup_key = str(entry["dedup_key"])
+            if dedup_key.count("|") >= 4:
+                target, eid, fid, classification, detail = dedup_key.split("|", 4)
+                return "|".join(
+                    [
+                        target,
+                        normalize_numeric(eid),
+                        normalize_numeric(fid),
+                        classification,
+                        detail,
+                    ]
+                )
+            return dedup_key
         return "|".join(
             [
                 str(entry.get("affected_target") or entry.get("target_kind") or "unknown"),
@@ -65,7 +77,7 @@ def merge_buckets(entries: list[dict]) -> dict:
             "hashes": sorted(set(hashes)),
             "affected_target": rep.get("affected_target"),
             "impact": impact_for_entry(rep),
-            "dedup_key": rep.get("dedup_key") or key,
+            "dedup_key": key,
             "bug_id": rep.get("bug_id") or f"bug-{hashlib.sha256(key.encode()).hexdigest()[:12]}",
             "repro_stability": rep.get("repro_stability")
             or {"attempts": 1, "label": "single_replay", "stable_ratio": 1.0},
