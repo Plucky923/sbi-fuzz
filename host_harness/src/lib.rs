@@ -511,6 +511,31 @@ mod tests {
 
     #[cfg(feature = "host-rustsbi")]
     #[test]
+    fn rustsbi_hsm_start_rejects_invalid_hart() {
+        let input = HostHarnessInput {
+            target_kind: HostTargetKind::RustSbi,
+            mode: HostHarnessMode::Ecall,
+            call: HostCall::new(0x4853_4d, 0, [255, 0, 0, 0, 0, 0]),
+            hart_id: 0,
+            hart_state: HostHartState::Unknown,
+            privilege: HostPrivilegeState::Supervisor,
+            memory_regions: Vec::new(),
+            platform_fault: HostPlatformFaultProfile::none(),
+            fdt_blob: Vec::new(),
+            label: "rustsbi-hsm-start-invalid-hart".to_string(),
+        };
+
+        let report = run(&input).expect("run rustsbi hsm start");
+        match report.result {
+            HostHarnessResult::Ecall(report) => {
+                assert_eq!(report.sbi_error, SbiError::InvalidParam.code());
+            }
+            HostHarnessResult::Fdt(_) => panic!("expected ecall report"),
+        }
+    }
+
+    #[cfg(feature = "host-rustsbi")]
+    #[test]
     fn rustsbi_hsm_status_rejects_invalid_hart() {
         let input = HostHarnessInput {
             target_kind: HostTargetKind::RustSbi,

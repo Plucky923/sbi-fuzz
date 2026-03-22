@@ -358,13 +358,16 @@ impl Ipi for MockIpi {
 }
 
 impl Hsm for MockHsm {
-    fn hart_start(&self, _hartid: usize, _start_addr: usize, _opaque: usize) -> SbiRet {
+    fn hart_start(&self, hartid: usize, _start_addr: usize, _opaque: usize) -> SbiRet {
         let mut state = self.state.0.borrow_mut();
         if matches!(
             state.platform_fault.mode,
             HostPlatformFaultMode::ReturnRawError | HostPlatformFaultMode::ReturnSbiError
         ) {
             return state.success_or_fault(0, false);
+        }
+        if hartid as u64 >= state.modeled_harts {
+            return SbiRet::invalid_param();
         }
         if state.hart_state == HostHartState::Started {
             return SbiRet::already_started();
