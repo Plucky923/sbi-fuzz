@@ -114,6 +114,7 @@ pub fn collect_coverage_report(
     smp: u16,
     symbolize_limit: usize,
 ) -> CoverageRunReport {
+    ensure_target_contract(&target);
     let outcome = execute(&target, &injector, &input, smp, false, symbolize_limit);
     build_coverage_report(&target, &injector, &input, &outcome)
 }

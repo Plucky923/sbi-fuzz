@@ -82,20 +82,21 @@ fn extract_input_profile(path: &Path) -> Result<(Vec<(u64, u64)>, String), Strin
             let signature = sequence_program_semantic_signature(&program);
             Ok((pairs, signature))
         }
-        _ => {
-            // Try exec binary first, then raw binary input
-            if let Ok(program) = exec_program_from_bytes(&bytes) {
-                let mut pairs = Vec::new();
-                for instr in &program.instructions {
-                    if let ExecInstr::Call { call_id, .. } = instr {
-                        if let Some((eid, fid)) = exec_call_eid_fid(*call_id) {
-                            pairs.push((eid, fid));
-                        }
-                    }
+        Some("exec") => {
+            let program = exec_program_from_bytes(&bytes)
+                .map_err(|e| format!("exec {}: {}", path.display(), e))?;
+            let mut pairs = Vec::new();
+            for instr in &program.instructions {
+                if let ExecInstr::Call { call_id, args, .. } = instr {
+                    pairs.push(exec_call_eid_fid(*call_id, args)
+                        .ok_or_else(|| format!("exec {}: cannot resolve call_id={}", path.display(), call_id))?);
                 }
-                let signature = format!("exec:{}", sha256_short(&bytes));
-                Ok((pairs, signature))
-            } else if bytes.len() >= 16 {
+            }
+            let signature = format!("exec:{}", sha256_short(&bytes));
+            Ok((pairs, signature))
+        }
+        _ => {
+            if bytes.len() >= 16 {
                 let input = input_from_binary(&bytes);
                 let eid = input.args.eid;
                 let fid = input.args.fid;
@@ -108,16 +109,30 @@ fn extract_input_profile(path: &Path) -> Result<(Vec<(u64, u64)>, String), Strin
     }
 }
 
-/// Map an exec call_id to (eid, fid) if it is a fixed call
-fn exec_call_eid_fid(call_id: u64) -> Option<(u64, u64)> {
-    for desc in EXEC_CALL_TABLE.iter() {
-        if desc.id == call_id {
-            if let ExecCallKind::Fixed { eid, fid } = desc.kind {
-                return Some((eid, fid));
+/// Map an exec call_id to (eid, fid).
+/// For raw_ecall (call_id == 0), extracts eid/fid from the first two call args.
+fn exec_call_eid_fid(call_id: u64, args: &[ExecArg]) -> Option<(u64, u64)> {
+    let desc = EXEC_CALL_TABLE.iter().find(|d| d.id == call_id)?;
+    match desc.kind {
+        ExecCallKind::Fixed { eid, fid } => Some((eid, fid)),
+        ExecCallKind::RawEcall => {
+            if args.len() < 2 {
+                return None;
             }
+            let eid = materialize_exec_arg(&args[0]);
+            let fid = materialize_exec_arg(&args[1]);
+            Some((eid, fid))
         }
     }
-    None
+}
+
+fn materialize_exec_arg(arg: &ExecArg) -> u64 {
+    match arg {
+        ExecArg::Const { value, .. } => *value,
+        ExecArg::Addr32 { offset } | ExecArg::Addr64 { offset } => *offset,
+        ExecArg::Result { default, .. } => *default,
+        ExecArg::Data(_) => 0,
+    }
 }
 
 /// Short SHA-256 hex digest of bytes
@@ -181,23 +196,20 @@ pub fn collect_coverage_baseline(args: CoverageBaseline) {
     let mut agg: HashMap<String, Agg> = HashMap::new();
 
     let mut processed = 0usize;
-    let mut failed = 0usize;
 
     for input_path in &input_files {
         let profile = match extract_input_profile(input_path) {
             Ok(p) => p,
             Err(e) => {
-                eprintln!("coverage-baseline: skip {}: {}", input_path.display(), e);
-                failed += 1;
-                continue;
+                eprintln!("coverage-baseline: failed to process {}: {}", input_path.display(), e);
+                std::process::exit(1);
             }
         };
 
         let (eid_fid_pairs, signature) = profile;
         if eid_fid_pairs.is_empty() {
-            eprintln!("coverage-baseline: skip {}: no eid/fid pairs found", input_path.display());
-            failed += 1;
-            continue;
+            eprintln!("coverage-baseline: no eid/fid pairs found in {}", input_path.display());
+            std::process::exit(1);
         }
 
         // Run coverage collection
@@ -267,10 +279,129 @@ pub fn collect_coverage_baseline(args: CoverageBaseline) {
         .expect(format!("write baseline file: {:?}", &args.output).as_str());
 
     println!(
-        "coverage-baseline: wrote {} to {} (processed {}, failed {})",
+        "coverage-baseline: wrote {} entries to {} (processed {})",
         report.entries.len(),
         args.output.display(),
-        processed,
-        failed
+        processed
     );
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_toml_input() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.toml");
+        let toml = r#"
+[metadata]
+source = "test"
+extension_name = "Base"
+
+[args]
+eid = 0x10
+fid = 0
+"#;
+        fs::write(&path, toml).unwrap();
+
+        let (pairs, sig) = extract_input_profile(&path).unwrap();
+        assert_eq!(pairs, vec![(0x10, 0)]);
+        assert!(sig.starts_with("toml:00000010:0:"));
+    }
+
+    #[test]
+    fn test_extract_seq_input() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.seq");
+        let program = SequenceProgram {
+            steps: vec![
+                SequenceStep::SetTargetHart { hart_id: 0 },
+                SequenceStep::Call {
+                    label: "test".to_string(),
+                    eid: 0x4853_4d,
+                    fid: 0,
+                    args: vec![],
+                    expect: None,
+                },
+            ],
+        };
+        fs::write(&path, sequence_program_to_bytes(&program)).unwrap();
+
+        let (pairs, sig) = extract_input_profile(&path).unwrap();
+        assert_eq!(pairs, vec![(0x4853_4d, 0)]);
+        assert!(sig.contains("hart:0"));
+        assert!(sig.contains("call:48534d:0:"));
+    }
+
+    #[test]
+    fn test_extract_fixed_exec_input() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.exec");
+        let input = InputData {
+            metadata: Metadata::from_call(0x4853_4d, 0, "test".to_string()),
+            args: Args {
+                eid: 0x4853_4d,
+                fid: 0,
+                arg0: 1,
+                arg1: 2,
+                arg2: 3,
+                arg3: 4,
+                arg4: 5,
+                arg5: 6,
+            },
+        };
+        let program = exec_program_from_input(&input);
+        fs::write(&path, exec_program_to_bytes(&program)).unwrap();
+
+        let (pairs, sig) = extract_input_profile(&path).unwrap();
+        assert_eq!(pairs, vec![(0x4853_4d, 0)]);
+        assert!(sig.starts_with("exec:"));
+    }
+
+    #[test]
+    fn test_extract_raw_ecall_exec_input() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.exec");
+        let input = InputData {
+            metadata: Metadata::from_call(0x1234, 0x56, "test".to_string()),
+            args: Args {
+                eid: 0x1234,
+                fid: 0x56,
+                arg0: 1,
+                arg1: 2,
+                arg2: 3,
+                arg3: 4,
+                arg4: 5,
+                arg5: 6,
+            },
+        };
+        let program = exec_program_from_input(&input);
+        fs::write(&path, exec_program_to_bytes(&program)).unwrap();
+
+        let (pairs, sig) = extract_input_profile(&path).unwrap();
+        assert_eq!(pairs, vec![(0x1234, 0x56)]);
+        assert!(sig.starts_with("exec:"));
+    }
+
+    #[test]
+    fn test_extract_invalid_input_fails() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.xyz");
+        fs::write(&path, b"not-a-valid-input").unwrap();
+
+        let result = extract_input_profile(&path);
+        assert!(result.is_err(), "expected failure for invalid input");
+    }
+
+    #[test]
+    fn test_extract_malformed_exec_fails() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.exec");
+        fs::write(&path, b"SBIBAD01garbage").unwrap();
+
+        let result = extract_input_profile(&path);
+        assert!(result.is_err(), "expected failure for malformed .exec");
+    }
 }
