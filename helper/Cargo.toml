@@ -14,7 +14,7 @@ qemu = [
 
 [dependencies]
 common = { path = "../common" }
-host_harness = { path = "../host_harness" }
+host_harness = { path = "../host_harness", default-features = false }
 clap = { version = "4.5", features = ["derive"] }
 libafl = { version = "0.15.1", optional = true }
 libafl_bolts = { version = "0.15.1", optional = true }
