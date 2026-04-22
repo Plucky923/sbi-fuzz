@@ -84,6 +84,8 @@ test-sequence-bug-report:
 
 test-coverage-baseline:
 	@bash ./tests/fixtures/baseline/run-validation-tests.sh
+	@bash ./tests/fixtures/baseline/run-missing-dir-test.sh
+	@bash ./tests/fixtures/baseline/run-positive-baseline-test.sh
 
 test-campaign-summary-delta:
 	@bash ./scripts/test-campaign-summary-delta.sh
