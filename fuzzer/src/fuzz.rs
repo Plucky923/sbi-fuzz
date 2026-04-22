@@ -12,7 +12,7 @@ use libafl::{
     generators::{Generator, RandBytesGenerator},
     inputs::{HasTargetBytes, Input, ResizableMutator},
     monitors::{ClientStats, Monitor, UserStatsValue},
-    mutators::{havoc_mutations::havoc_mutations, scheduled::StdScheduledMutator},
+    mutators::{scheduled::StdScheduledMutator},
     nonzero,
     observers::{CanTrack, HitcountsMapObserver, TimeObserver, VariableMapObserver},
     schedulers::{IndexesLenTimeMinimizerScheduler, QueueScheduler},
@@ -24,11 +24,12 @@ use libafl_bolts::{
     core_affinity::Cores,
     current_nanos, current_time, generic_hash_std, impl_serdeany,
     ownedref::OwnedMutSlice,
-    rands::StdRand,
+    rands::{Rand, StdRand},
     shmem::{ShMemProvider, StdShMemProvider},
     tuples::tuple_list,
     AsSlice, ClientId,
 };
+use rand::Rng;
 use libafl_qemu::{
     elf::EasyElf, executor::QemuExecutor, modules::edges::StdEdgeCoverageModuleBuilder, Emulator,
     QemuExitError, QemuExitReason, QemuShutdownCause, Regs,
@@ -170,9 +171,9 @@ impl ResizableMutator<u8> for FuzzInput {
 }
 
 /// Adapter that bridges `libafl_bolts::rand::Rand` to `rand::RngCore` (rand 0.8).
-struct LibAflRngAdapter<'a, R: libafl_bolts::rand::Rand>(&'a mut R);
+struct LibAflRngAdapter<'a, R: Rand>(&'a mut R);
 
-impl<R: libafl_bolts::rand::Rand> rand::RngCore for LibAflRngAdapter<'_, R> {
+impl<R: Rand> rand::RngCore for LibAflRngAdapter<'_, R> {
     fn next_u32(&mut self) -> u32 {
         (self.0.next() >> 32) as u32
     }
@@ -197,20 +198,20 @@ impl<R: libafl_bolts::rand::Rand> rand::RngCore for LibAflRngAdapter<'_, R> {
 /// (exec / sequence / raw) and falls back to havoc mutations.
 #[derive(Debug)]
 struct DispatchMutator {
-    havoc: StdScheduledMutator<libafl::mutators::havoc_mutations::HavocMutationsType>,
+    havoc: StdScheduledMutator<libafl::mutators::havoc_mutations::HavocMutationsNoCrossoverType>,
 }
 
 impl DispatchMutator {
     fn new() -> Self {
         Self {
-            havoc: StdScheduledMutator::new(libafl::mutators::havoc_mutations::havoc_mutations()),
+            havoc: StdScheduledMutator::new(libafl::mutators::havoc_mutations::havoc_mutations_no_crossover()),
         }
     }
 }
 
 impl<S> libafl::mutators::Mutator<FuzzInput, S> for DispatchMutator
 where
-    S: libafl::state::HasRand,
+    S: libafl::state::HasRand + libafl::state::HasMaxSize,
 {
     fn mutate(
         &mut self,
