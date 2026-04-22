@@ -430,6 +430,15 @@ pub fn run_sequence_program(
                 steps.push(report.clone());
                 continue;
             }
+            SequenceStep::Barrier { hart_mask, hart_mask_base } => {
+                state_only_step(index, "barrier", format!("mask=0x{hart_mask:x}/base={hart_mask_base}"), &state)
+            }
+            SequenceStep::WaitForHartStateHint { hart_id, state: hart_state, timeout_ms } => {
+                state_only_step(index, "wait_for_hart_state", format!("hart-{hart_id}-{hart_state:?}-timeout-{timeout_ms}"), &state)
+            }
+            SequenceStep::ReuseResultAsArg { call_index, target_call_index, target_arg_index } => {
+                state_only_step(index, "reuse_result", format!("{call_index}->{target_call_index}[{target_arg_index}]"), &state)
+            }
         };
         steps.push(report);
     }
@@ -639,6 +648,9 @@ fn detect_sequence_violation(
                     }));
                 }
             }
+            SequenceStep::Barrier { .. } => {}
+            SequenceStep::WaitForHartStateHint { .. } => {}
+            SequenceStep::ReuseResultAsArg { .. } => {}
         }
     }
 

@@ -34,7 +34,7 @@ int __attribute__((noinline)) BREAKPOINT() {
 #define EXEC_MAX_RESULTS 128
 #define EXEC_MAX_ARGS 8
 #define EXEC_CALL_COUNT 11
-#define SBI_COVERAGE_PC_CAPACITY 1024
+#define SBI_COVERAGE_PC_CAPACITY 8192
 #define SBI_ORACLE_BUFFER_WORDS 9
 
 #define EXEC_INSTR_EOF ((uint64_t)-1)
@@ -123,7 +123,7 @@ static const exec_call_desc_t EXEC_CALLS[EXEC_CALL_COUNT] = {
 };
 
 uint8_t FUZZ_INPUT[FUZZ_INPUT_SIZE] = {};
-volatile uint64_t SBI_COVERAGE_BUFFER[SBI_COVERAGE_PC_CAPACITY + 1]
+volatile uint64_t SBI_COVERAGE_BUFFER[1 + 2 * SBI_COVERAGE_PC_CAPACITY]
     __attribute__((section(".sbifuzz_shmem"))) = {};
 volatile uint64_t SBI_ORACLE_FAILURE_BUFFER[SBI_ORACLE_BUFFER_WORDS]
     __attribute__((section(".sbifuzz_shmem"))) = {};
@@ -151,7 +151,7 @@ typedef struct {
 static hart_dispatch_t HART_DISPATCH = {};
 
 static void reset_sbi_coverage(void) {
-    for (int i = 0; i < SBI_COVERAGE_PC_CAPACITY + 1; i++) {
+    for (int i = 0; i < 1 + 2 * SBI_COVERAGE_PC_CAPACITY; i++) {
         SBI_COVERAGE_BUFFER[i] = 0;
     }
 }

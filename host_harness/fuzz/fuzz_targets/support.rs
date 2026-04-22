@@ -167,6 +167,9 @@ pub fn run_diff_sequence(bytes: &[u8]) {
                     panic!("sequence diff violation at step {index}: {:?}", diffs[0]);
                 }
             }
+            SequenceStep::Barrier { .. } => {}
+            SequenceStep::WaitForHartStateHint { .. } => {}
+            SequenceStep::ReuseResultAsArg { .. } => {}
         }
     }
 }
@@ -452,6 +455,9 @@ fn execute_sequence(program: &SequenceProgram, target_kind: HostTargetKind) {
                 };
                 let _ = run_host_input(&input);
             }
+            SequenceStep::Barrier { .. } => {}
+            SequenceStep::WaitForHartStateHint { .. } => {}
+            SequenceStep::ReuseResultAsArg { .. } => {}
         }
     }
 }

@@ -110,7 +110,7 @@ fn render_opensbi_trace_pc_source() -> String {
         "/*\n \
 * SPDX-License-Identifier: BSD-2-Clause\n \
 *\n \
-* Shared-memory sanitizer coverage hooks for sbifuzz.\n \
+* Shared-memory sanitizer coverage hooks for sbifuzz (v2: hart_id + pc).\n \
 */\n\n\
 #include <sbi/sbi_types.h>\n\n\
 #if defined(__clang__)\n\
@@ -120,21 +120,32 @@ fn render_opensbi_trace_pc_source() -> String {
 #endif\n\n\
 #define SBIFUZZ_COVERAGE_ADDR {:#x}UL\n\
 #define SBIFUZZ_COVERAGE_CAPACITY {}\n\n\
+struct sbifuzz_coverage_entry {{\n\
+\tvolatile unsigned long hart_id;\n\
+\tvolatile unsigned long pc;\n\
+}};\n\n\
 struct sbifuzz_coverage_buffer {{\n\
 \tvolatile unsigned long count;\n\
-\tvolatile unsigned long pcs[SBIFUZZ_COVERAGE_CAPACITY];\n\
+\tstruct sbifuzz_coverage_entry entries[SBIFUZZ_COVERAGE_CAPACITY];\n\
 }};\n\n\
 static SBIFUZZ_NO_SANITIZE struct sbifuzz_coverage_buffer *sbifuzz_cov_buffer(void)\n{{\n\
 \treturn (struct sbifuzz_coverage_buffer *)SBIFUZZ_COVERAGE_ADDR;\n\
+}}\n\n\
+static SBIFUZZ_NO_SANITIZE unsigned long sbifuzz_current_hartid(void)\n{{\n\
+\tunsigned long hartid;\n\
+\t__asm__ __volatile__(\"csrr %0, mhartid\" : \"=r\"(hartid));\n\
+\treturn hartid;\n\
 }}\n\n\
 static SBIFUZZ_NO_SANITIZE void sbifuzz_cov_record_pc(unsigned long pc)\n{{\n\
 \tstruct sbifuzz_coverage_buffer *buf = sbifuzz_cov_buffer();\n\
 \tunsigned long count = buf->count;\n\n\
 \tif (count >= SBIFUZZ_COVERAGE_CAPACITY)\n\
 \t\treturn;\n\
-\tif (count > 0 && buf->pcs[count - 1] == pc)\n\
+\tif (count > 0 && buf->entries[count - 1].pc == pc &&\n\
+\t    buf->entries[count - 1].hart_id == sbifuzz_current_hartid())\n\
 \t\treturn;\n\n\
-\tbuf->pcs[count] = pc;\n\
+\tbuf->entries[count].hart_id = sbifuzz_current_hartid();\n\
+\tbuf->entries[count].pc = pc;\n\
 \tbuf->count = count + 1;\n\
 }}\n\n\
 void SBIFUZZ_NO_SANITIZE __attribute__((used)) __sanitizer_cov_trace_pc(void)\n{{\n\

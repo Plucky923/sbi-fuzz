@@ -478,7 +478,7 @@ fn execute(
         if let Ok(coverage) = snapshot.parsed.as_ref() {
             if !coverage.is_empty() {
                 fallback_to_qemu_edges = false;
-                symbolized = symbolize_coverage_pcs(target, &coverage.pcs, symbolize_limit)
+                symbolized = symbolize_coverage_pcs(target, &coverage.pcs(), symbolize_limit)
                     .unwrap_or_else(|_| Vec::new());
             }
         }
@@ -514,7 +514,7 @@ fn print_coverage_summary(
                 coverage.unique_pcs().len()
             );
             if symbolized.is_empty() {
-                if let Ok(lines) = symbolize_coverage_pcs(target, &coverage.pcs, 8) {
+                if let Ok(lines) = symbolize_coverage_pcs(target, &coverage.pcs(), 8) {
                     for line in lines {
                         println!("  {}", line);
                     }
@@ -553,7 +553,7 @@ pub fn build_coverage_report(
                 shared_buffer_addr: format_hex_u64(snapshot.addr),
                 raw_count: coverage.raw_count,
                 unique_count: coverage.unique_pcs().len(),
-                pcs: coverage.pcs.iter().map(|pc| format_hex_u64(*pc)).collect(),
+                pcs: coverage.pcs().iter().map(|pc| format_hex_u64(*pc)).collect(),
                 symbols: outcome.symbolized.clone(),
             })
     });

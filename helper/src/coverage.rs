@@ -67,7 +67,7 @@ pub fn print_shared_coverage_info(injector: PathBuf) {
     match resolve_shared_coverage(&elf) {
         Some(coverage) => {
             println!(
-                "symbol={} addr=0x{:x} expected_addr=0x{:x} capacity={} words={} bytes={} format='word0=count, word1..=pcs'",
+                "symbol={} addr=0x{:x} expected_addr=0x{:x} capacity={} words={} bytes={} format='word0=count, words=hart_id:pc pairs'",
                 SBI_COVERAGE_BUFFER_SYMBOL,
                 coverage.addr,
                 SBI_COVERAGE_BUFFER_ADDR,

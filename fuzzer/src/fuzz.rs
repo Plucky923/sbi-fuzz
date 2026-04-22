@@ -79,11 +79,11 @@ fn collect_shared_coverage(
     parse_sbi_coverage_buffer(&bytes)
 }
 
-fn overwrite_edges_with_shared_coverage(pcs: &[u64]) {
+fn overwrite_edges_with_shared_coverage(entries: &[CoverageEntry]) {
     let edges =
         unsafe { std::slice::from_raw_parts_mut(edges_map_mut_ptr(), EDGES_MAP_DEFAULT_SIZE) };
     edges.fill(0);
-    let max_edges = fold_sbi_coverage_into_map(pcs, edges);
+    let max_edges = fold_sbi_coverage_into_edge_map(entries, edges);
     unsafe {
         MAX_EDGES_FOUND = max_edges;
     }
@@ -472,7 +472,7 @@ pub fn fuzz(
             if let Some(shared_coverage) = shared_coverage {
                 if let Ok(coverage) = collect_shared_coverage(&emulator.qemu(), shared_coverage) {
                     if !coverage.is_empty() {
-                        overwrite_edges_with_shared_coverage(&coverage.pcs);
+                        overwrite_edges_with_shared_coverage(&coverage.entries);
                     }
                 }
             }
