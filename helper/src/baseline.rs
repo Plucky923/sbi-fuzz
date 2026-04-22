@@ -4,7 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
-use crate::runner::{collect_coverage_report, CoverageRunReport};
+use crate::runner::{collect_coverage_report, collect_coverage_report_with_timeout};
 
 /// Arguments for the coverage baseline command
 #[derive(clap::Args)]
@@ -24,6 +24,9 @@ pub struct CoverageBaseline {
     /// Number of symbolized PCs to include in reports
     #[arg(long, default_value_t = 8)]
     symbolize_limit: usize,
+    /// Optional wall-clock timeout per input (ms)
+    #[arg(long)]
+    timeout_ms: Option<u64>,
 }
 
 /// Per-extension/function baseline statistics
@@ -43,8 +46,19 @@ struct BaselineReport {
     schema_version: String,
     target: String,
     injector: String,
-    #[serde(flatten)]
     entries: HashMap<String, BaselineEntry>,
+}
+
+/// Recognized seed file extensions
+const SEED_EXTENSIONS: &[&str] = &["toml", "exec", "seq", "bin", "raw"];
+
+/// Check if a file path has a recognized seed extension
+fn is_seed_file(path: &Path) -> bool {
+    match path.extension().and_then(|e| e.to_str()) {
+        Some(ext) if SEED_EXTENSIONS.contains(&ext) => true,
+        None => true, // no extension is treated as raw binary
+        _ => false,
+    }
 }
 
 /// Extract (eid, fid) pairs and semantic signature from an input file
@@ -57,22 +71,18 @@ fn extract_input_profile(path: &Path) -> Result<(Vec<(u64, u64)>, String), Strin
         Some("toml") => {
             let content = String::from_utf8(bytes.clone())
                 .map_err(|e| format!("utf8 {}: {}", path.display(), e))?;
-            let input = fix_input_args(input_from_toml(&content));
+            let input = fix_input_args(
+                try_input_from_toml(&content)
+                    .map_err(|e| format!("toml {}: {}", path.display(), e))?
+            );
             let eid = input.args.eid;
             let fid = input.args.fid;
-            let signature = format!("toml:{eid:08x}:{fid:x}:{}", sha256_short(&bytes));
+            let signature = format!("toml:{eid:08x}:{fid:x}:{}", content_hash_short(&bytes));
             Ok((vec![(eid, fid)], signature))
         }
-        Some("seq") | Some("json") => {
-            let program = if ext == Some("json") {
-                let content = String::from_utf8(bytes.clone())
-                    .map_err(|e| format!("utf8 {}: {}", path.display(), e))?;
-                serde_json::from_str::<SequenceProgram>(&content)
-                    .map_err(|e| format!("json {}: {}", path.display(), e))?
-            } else {
-                sequence_program_from_bytes(&bytes)
-                    .map_err(|e| format!("seq {}: {}", path.display(), e))?
-            };
+        Some("seq") => {
+            let program = sequence_program_from_bytes(&bytes)
+                .map_err(|e| format!("seq {}: {}", path.display(), e))?;
             let mut pairs = Vec::new();
             for step in &program.steps {
                 if let SequenceStep::Call { eid, fid, .. } = step {
@@ -92,25 +102,28 @@ fn extract_input_profile(path: &Path) -> Result<(Vec<(u64, u64)>, String), Strin
                         .ok_or_else(|| format!("exec {}: cannot resolve call_id={}", path.display(), call_id))?);
                 }
             }
-            let signature = format!("exec:{}", sha256_short(&bytes));
+            let signature = format!("exec:{}", content_hash_short(&bytes));
             Ok((pairs, signature))
         }
-        _ => {
+        None | Some("bin") | Some("raw") => {
             if bytes.len() >= 16 {
                 let input = input_from_binary(&bytes);
                 let eid = input.args.eid;
                 let fid = input.args.fid;
-                let signature = format!("raw:{eid:08x}:{fid:x}:{}", sha256_short(&bytes));
+                let signature = format!("raw:{eid:08x}:{fid:x}:{}", content_hash_short(&bytes));
                 Ok((vec![(eid, fid)], signature))
             } else {
-                Err(format!("unrecognized input format: {}", path.display()))
+                Err(format!("raw binary too short (need >= 16 bytes): {}", path.display()))
             }
+        }
+        Some(other) => {
+            Err(format!("unsupported extension '.{}' for seed file: {}", other, path.display()))
         }
     }
 }
 
 /// Map an exec call_id to (eid, fid).
-/// For raw_ecall (call_id == 0), extracts eid/fid from the first two call args.
+/// For raw_ecall (call_id == 0), requires the first two args to be Const.
 fn exec_call_eid_fid(call_id: u64, args: &[ExecArg]) -> Option<(u64, u64)> {
     let desc = EXEC_CALL_TABLE.iter().find(|d| d.id == call_id)?;
     match desc.kind {
@@ -119,24 +132,23 @@ fn exec_call_eid_fid(call_id: u64, args: &[ExecArg]) -> Option<(u64, u64)> {
             if args.len() < 2 {
                 return None;
             }
-            let eid = materialize_exec_arg(&args[0]);
-            let fid = materialize_exec_arg(&args[1]);
+            let eid = arg_as_const_u64(&args[0])?;
+            let fid = arg_as_const_u64(&args[1])?;
             Some((eid, fid))
         }
     }
 }
 
-fn materialize_exec_arg(arg: &ExecArg) -> u64 {
+/// Extract a u64 value from an ExecArg only if it is Const.
+fn arg_as_const_u64(arg: &ExecArg) -> Option<u64> {
     match arg {
-        ExecArg::Const { value, .. } => *value,
-        ExecArg::Addr32 { offset } | ExecArg::Addr64 { offset } => *offset,
-        ExecArg::Result { default, .. } => *default,
-        ExecArg::Data(_) => 0,
+        ExecArg::Const { value, .. } => Some(*value),
+        _ => None,
     }
 }
 
-/// Short SHA-256 hex digest of bytes
-fn sha256_short(bytes: &[u8]) -> String {
+/// Short content hash for signature deduplication
+fn content_hash_short(bytes: &[u8]) -> String {
     use std::hash::Hasher;
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     hasher.write(bytes);
@@ -167,11 +179,11 @@ pub fn collect_coverage_baseline(args: CoverageBaseline) {
         }
     }
 
-    // Gather all input files
+    // Gather all input files (filter to known seed extensions)
     let mut input_files = Vec::new();
     for dir in &args.input_dirs {
         for entry in WalkDir::new(dir).into_iter().filter_map(|e| e.ok()) {
-            if entry.file_type().is_file() {
+            if entry.file_type().is_file() && is_seed_file(entry.path()) {
                 input_files.push(entry.path().to_path_buf());
             }
         }
@@ -212,16 +224,36 @@ pub fn collect_coverage_baseline(args: CoverageBaseline) {
             std::process::exit(1);
         }
 
-        // Run coverage collection
-        let report = collect_coverage_report(
-            args.target.clone(),
-            args.injector.clone(),
-            input_path.clone(),
-            args.smp,
-            args.symbolize_limit,
-        );
+        // Run coverage collection (with optional per-input timeout)
+        let report = match args.timeout_ms {
+            Some(ms) if ms > 0 => collect_coverage_report_with_timeout(
+                args.target.clone(),
+                args.injector.clone(),
+                input_path.clone(),
+                args.smp,
+                args.symbolize_limit,
+                ms,
+            ),
+            _ => collect_coverage_report(
+                args.target.clone(),
+                args.injector.clone(),
+                input_path.clone(),
+                args.smp,
+                args.symbolize_limit,
+            ),
+        };
 
         let is_timeout = report.exit_kind == "Timeout";
+
+        // Hard-fail on coverage parse errors
+        if let Some(ref err) = report.coverage_parse_error {
+            eprintln!("coverage-baseline: coverage parse error for {}: {}", input_path.display(), err);
+            std::process::exit(1);
+        }
+        if report.coverage.is_none() && !is_timeout {
+            eprintln!("coverage-baseline: no coverage data for {} (exit_kind={})", input_path.display(), report.exit_kind);
+            std::process::exit(1);
+        }
 
         // Collect PCs from report
         let mut report_pcs: Vec<String> = Vec::new();
@@ -303,12 +335,28 @@ extension_name = "Base"
 [args]
 eid = 0x10
 fid = 0
+arg0 = 1
+arg1 = 2
+arg2 = 3
+arg3 = 4
+arg4 = 5
+arg5 = 6
 "#;
         fs::write(&path, toml).unwrap();
 
         let (pairs, sig) = extract_input_profile(&path).unwrap();
         assert_eq!(pairs, vec![(0x10, 0)]);
         assert!(sig.starts_with("toml:00000010:0:"));
+    }
+
+    #[test]
+    fn test_extract_malformed_toml_fails() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.toml");
+        fs::write(&path, b"not valid toml [[[").unwrap();
+
+        let result = extract_input_profile(&path);
+        assert!(result.is_err(), "expected failure for malformed toml");
     }
 
     #[test]

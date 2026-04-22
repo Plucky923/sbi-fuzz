@@ -34,7 +34,7 @@ struct RunOutcome {
     fallback_to_qemu_edges: bool,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, serde::Deserialize)]
 pub struct CoverageArtifact {
     pub shared_buffer_addr: String,
     pub raw_count: usize,
@@ -43,7 +43,7 @@ pub struct CoverageArtifact {
     pub symbols: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, serde::Deserialize)]
 pub struct CoverageRunReport {
     pub target: String,
     pub injector: String,
@@ -117,6 +117,71 @@ pub fn collect_coverage_report(
     ensure_target_contract(&target);
     let outcome = execute(&target, &injector, &input, smp, false, symbolize_limit);
     build_coverage_report(&target, &injector, &input, &outcome)
+}
+
+pub fn collect_coverage_report_with_timeout(
+    target: PathBuf,
+    injector: PathBuf,
+    input: PathBuf,
+    smp: u16,
+    symbolize_limit: usize,
+    timeout_ms: u64,
+) -> CoverageRunReport {
+    ensure_target_contract(&target);
+    let json_tmp = tempfile::NamedTempFile::with_suffix(".json")
+        .expect("create temp json file for coverage report");
+    let json_path = json_tmp.path().to_path_buf();
+
+    let current_exe = std::env::current_exe().expect("resolve current helper executable");
+    let mut child = std::process::Command::new(current_exe);
+    child
+        .arg("collect-coverage-once")
+        .arg(&target)
+        .arg(&injector)
+        .arg(&input)
+        .arg("--smp")
+        .arg(smp.to_string())
+        .arg("--symbolize-limit")
+        .arg(symbolize_limit.to_string())
+        .arg("--json-out")
+        .arg(&json_path);
+
+    let mut child = child
+        .spawn()
+        .expect("spawn timeout-bounded helper coverage child");
+
+    let deadline = std::time::Duration::from_millis(timeout_ms);
+    let start = std::time::Instant::now();
+    loop {
+        if let Some(status) = child
+            .try_wait()
+            .expect("poll timeout-bounded helper coverage child")
+        {
+            if !status.success() {
+                std::process::exit(status.code().unwrap_or(1));
+            }
+            let json = std::fs::read_to_string(&json_path)
+                .expect("read coverage json from temp file");
+            return serde_json::from_str(&json)
+                .expect("parse coverage json report");
+        }
+        if start.elapsed() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = std::fs::remove_file(&json_path);
+            return CoverageRunReport {
+                target: target.display().to_string(),
+                injector: injector.display().to_string(),
+                input: input.display().to_string(),
+                exit_kind: "Timeout".to_string(),
+                fallback_to_qemu_edges: false,
+                coverage_parse_error: None,
+                coverage: None,
+                oracle_failure: None,
+            };
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
 }
 
 pub fn collect_coverage(
