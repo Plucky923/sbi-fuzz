@@ -2,3 +2,4 @@ target
 build
 output
 __pycache__
+.humanize/
