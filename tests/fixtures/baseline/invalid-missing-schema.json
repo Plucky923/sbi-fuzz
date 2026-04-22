@@ -1,0 +1,12 @@
+{
+  "target": "fw_dynamic.bin",
+  "injector": "injector.elf",
+  "entries": {
+    "0x00000010/0x0": {
+      "unique_pcs": 42,
+      "total_pcs": 128,
+      "semantic_signature_count": 3,
+      "timeout_count": 0
+    }
+  }
+}

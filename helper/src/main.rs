@@ -781,7 +781,13 @@ fn parse_binary_input(input: PathBuf) {
 
 fn encode_exec_input(input: PathBuf) {
     let toml_content = fs::read_to_string(&input).expect("read input file");
-    let input = fix_input_args(input_from_toml(&toml_content));
+    let input = match try_input_from_toml(&toml_content) {
+        Ok(data) => fix_input_args(data),
+        Err(err) => {
+            eprintln!("encode-exec-input: failed to parse TOML: {err}");
+            std::process::exit(1);
+        }
+    };
     let program = normalize_exec_program(exec_program_from_input(&input));
     let binary = exec_program_to_bytes(&program);
     let output_path = PathBuf::from(".").join(format!("{}.exec", input.hash_string()));
