@@ -35,24 +35,24 @@ struct RunOutcome {
 }
 
 #[derive(Debug, Clone, Serialize)]
-struct CoverageArtifact {
-    shared_buffer_addr: String,
-    raw_count: usize,
-    unique_count: usize,
-    pcs: Vec<String>,
-    symbols: Vec<String>,
+pub struct CoverageArtifact {
+    pub shared_buffer_addr: String,
+    pub raw_count: usize,
+    pub unique_count: usize,
+    pub pcs: Vec<String>,
+    pub symbols: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
-struct CoverageRunReport {
-    target: String,
-    injector: String,
-    input: String,
-    exit_kind: String,
-    fallback_to_qemu_edges: bool,
-    coverage_parse_error: Option<String>,
-    coverage: Option<CoverageArtifact>,
-    oracle_failure: Option<String>,
+pub struct CoverageRunReport {
+    pub target: String,
+    pub injector: String,
+    pub input: String,
+    pub exit_kind: String,
+    pub fallback_to_qemu_edges: bool,
+    pub coverage_parse_error: Option<String>,
+    pub coverage: Option<CoverageArtifact>,
+    pub oracle_failure: Option<String>,
 }
 
 enum StartupAction {
@@ -107,6 +107,17 @@ pub fn run(target: PathBuf, injector: PathBuf, input: PathBuf, smp: u16) {
 }
 
 /// Execute one input and export shared-memory coverage artifacts.
+pub fn collect_coverage_report(
+    target: PathBuf,
+    injector: PathBuf,
+    input: PathBuf,
+    smp: u16,
+    symbolize_limit: usize,
+) -> CoverageRunReport {
+    let outcome = execute(&target, &injector, &input, smp, false, symbolize_limit);
+    build_coverage_report(&target, &injector, &input, &outcome)
+}
+
 pub fn collect_coverage(
     target: PathBuf,
     injector: PathBuf,
@@ -457,7 +468,7 @@ fn print_coverage_summary(
     }
 }
 
-fn build_coverage_report(
+pub fn build_coverage_report(
     target: &PathBuf,
     injector: &PathBuf,
     input: &PathBuf,

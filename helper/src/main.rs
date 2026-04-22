@@ -11,6 +11,9 @@ use std::{
 
 // Import modules that implement different functionalities
 #[cfg(feature = "qemu")]
+#[cfg(feature = "qemu")]
+mod baseline;
+#[cfg(feature = "qemu")]
 mod coverage;
 mod instrumenter;
 #[cfg(feature = "qemu")]
@@ -101,6 +104,9 @@ enum Commands {
     InstrumentKasan(InstrumentKasan),
     /// Parse the input from a binary file
     ParseBinaryInput(ParseBinaryInput),
+    /// Collect coverage baseline across input directories and emit baseline.json
+    #[cfg(feature = "qemu")]
+    CoverageBaseline(baseline::CoverageBaseline),
 }
 
 /// Arguments for seed generation command
@@ -586,6 +592,10 @@ fn main() {
         Commands::ParseBinaryInput(args) => {
             // Parse and convert binary input to a more readable format
             parse_binary_input(args.input);
+        }
+        #[cfg(feature = "qemu")]
+        Commands::CoverageBaseline(args) => {
+            baseline::collect_coverage_baseline(args);
         }
     }
 }
