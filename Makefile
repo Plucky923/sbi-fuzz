@@ -28,6 +28,7 @@ preflight-fixture:
 	@$(MAKE) test-opensbi-bug-report
 	@$(MAKE) test-sequence-bug-report
 	@$(MAKE) test-sbi-hang-semantic-buckets
+	@$(MAKE) test-coverage-baseline
 
 check-env:
 	@./scripts/check-env.sh
@@ -81,6 +82,9 @@ test-s0-workflow:
 
 test-sequence-bug-report:
 	@bash ./scripts/test-report-sequence-bugs.sh
+
+test-coverage-baseline:
+	@bash ./tests/fixtures/baseline/run-validation-tests.sh
 
 test-campaign-summary-delta:
 	@bash ./scripts/test-campaign-summary-delta.sh

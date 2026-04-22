@@ -27,4 +27,13 @@ else
     exit 1
 fi
 
+# Test 3: non-integer stat field should fail
+echo -n "Test 3 (non-integer unique_pcs): "
+if ! python3 "$VALIDATOR" "$SCRIPT_DIR/invalid-string-pcs.json" --kind coverage-baseline >/dev/null 2>&1; then
+    echo "PASS"
+else
+    echo "FAIL"
+    exit 1
+fi
+
 echo "=== All fixture tests passed ==="

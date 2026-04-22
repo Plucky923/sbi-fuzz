@@ -50,13 +50,12 @@ struct BaselineReport {
 }
 
 /// Recognized seed file extensions
-const SEED_EXTENSIONS: &[&str] = &["toml", "exec", "seq", "bin", "raw"];
+const SEED_EXTENSIONS: &[&str] = &["toml", "exec", "seq"];
 
 /// Check if a file path has a recognized seed extension
 fn is_seed_file(path: &Path) -> bool {
     match path.extension().and_then(|e| e.to_str()) {
         Some(ext) if SEED_EXTENSIONS.contains(&ext) => true,
-        None => true, // no extension is treated as raw binary
         _ => false,
     }
 }
@@ -105,16 +104,11 @@ fn extract_input_profile(path: &Path) -> Result<(Vec<(u64, u64)>, String), Strin
             let signature = format!("exec:{}", content_hash_short(&bytes));
             Ok((pairs, signature))
         }
-        None | Some("bin") | Some("raw") => {
-            if bytes.len() >= 16 {
-                let input = input_from_binary(&bytes);
-                let eid = input.args.eid;
-                let fid = input.args.fid;
-                let signature = format!("raw:{eid:08x}:{fid:x}:{}", content_hash_short(&bytes));
-                Ok((vec![(eid, fid)], signature))
-            } else {
-                Err(format!("raw binary too short (need >= 16 bytes): {}", path.display()))
-            }
+        Some("bin") | Some("raw") => {
+            Err(format!("raw binary seeds (.bin/.raw) are not accepted to prevent pollution: {}", path.display()))
+        }
+        None => {
+            Err(format!("unsupported seed file (no extension): {}", path.display()))
         }
         Some(other) => {
             Err(format!("unsupported extension '.{}' for seed file: {}", other, path.display()))
@@ -455,5 +449,29 @@ arg5 = 6
 
         let result = extract_input_profile(&path);
         assert!(result.is_err(), "expected failure for malformed .exec");
+    }
+
+    #[test]
+    fn test_extract_bin_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.bin");
+        fs::write(&path, vec![0u8; 32]).unwrap();
+
+        let result = extract_input_profile(&path);
+        assert!(result.is_err(), "expected .bin rejection");
+        let msg = result.unwrap_err();
+        assert!(msg.contains(".bin/.raw"), "error should mention .bin/.raw rejection: {}", msg);
+    }
+
+    #[test]
+    fn test_extract_extensionless_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("noextension");
+        fs::write(&path, vec![0u8; 32]).unwrap();
+
+        let result = extract_input_profile(&path);
+        assert!(result.is_err(), "expected extensionless rejection");
+        let msg = result.unwrap_err();
+        assert!(msg.contains("no extension"), "error should mention no extension: {}", msg);
     }
 }
