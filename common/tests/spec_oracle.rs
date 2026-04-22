@@ -341,3 +341,90 @@ fn pmu_snapshot_invalid_address_requires_invalid_param_error() {
             && context.contains("snapshot_set_shmem")
     ));
 }
+
+#[test]
+fn timer_set_timer_requires_success() {
+    let input = sample_input(0x5449_4d45, 0, [0; 6]);
+    let report = sample_report(0x5449_4d45, 0, SbiError::Failed.code(), 0);
+    let violations = check_ecall_result(&input, &report);
+    assert!(matches!(
+        violations.as_slice(),
+        [SpecViolation::WrongErrorCode {
+            expected,
+            got,
+            context
+        }] if *expected == SbiError::Success.code()
+            && *got == SbiError::Failed.code()
+            && context.contains("set_timer")
+    ));
+}
+
+#[test]
+fn reset_invalid_type_is_rejected() {
+    let input = sample_input(0x5352_5354, 0, [0x5, 0, 0, 0, 0, 0]);
+    let report = sample_report(0x5352_5354, 0, SbiError::Success.code(), 0);
+    let violations = check_ecall_result(&input, &report);
+    assert!(matches!(
+        violations.as_slice(),
+        [SpecViolation::WrongErrorCode {
+            expected,
+            got,
+            context
+        }] if *expected == SbiError::InvalidParam.code()
+            && *got == SbiError::Success.code()
+            && context.contains("system_reset")
+    ));
+}
+
+#[test]
+fn sta_set_shmem_invalid_address_is_rejected() {
+    let input = sample_input(0x535441, 0, [0x8000_3000, 0, 0, 0, 0, 0]);
+    let report = sample_report(0x535441, 0, SbiError::Success.code(), 0);
+    let violations = check_ecall_result(&input, &report);
+    assert!(matches!(
+        violations.as_slice(),
+        [SpecViolation::InvalidAddressNotRejected { .. }]
+    ));
+}
+
+#[test]
+fn sta_system_suspend_invalid_type_is_rejected() {
+    let input = sample_input(0x535441, 2, [0x2, 0, 0, 0, 0, 0]);
+    let report = sample_report(0x535441, 2, SbiError::Success.code(), 0);
+    let violations = check_ecall_result(&input, &report);
+    assert!(matches!(
+        violations.as_slice(),
+        [SpecViolation::WrongErrorCode {
+            expected,
+            got,
+            context
+        }] if *expected == SbiError::InvalidParam.code()
+            && *got == SbiError::Success.code()
+            && context.contains("system_suspend")
+    ));
+}
+
+#[test]
+fn nacl_sync_hart_requires_success() {
+    let input = sample_input(0x4e41_434c, 1, [0; 6]);
+    let report = sample_report(0x4e41_434c, 1, SbiError::Failed.code(), 0);
+    let violations = check_ecall_result(&input, &report);
+    assert!(matches!(
+        violations.as_slice(),
+        [SpecViolation::WrongErrorCode {
+            expected,
+            got,
+            context
+        }] if *expected == SbiError::Success.code()
+            && *got == SbiError::Failed.code()
+            && context.contains("nacl")
+    ));
+}
+
+#[test]
+fn known_extension_nacl_is_not_treated_as_unknown() {
+    let input = sample_input(0x4e41_434c, 0, [0; 6]);
+    let report = sample_report(0x4e41_434c, 0, SbiError::Success.code(), 0);
+    let violations = check_ecall_result(&input, &report);
+    assert!(!violations.iter().any(|v| matches!(v, SpecViolation::UnsupportedExtensionWrongError { .. })));
+}

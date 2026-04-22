@@ -66,6 +66,10 @@ pub fn check_ecall_result(input: &HostHarnessInput, report: &HostEcallReport) ->
         0x4853_4d => check_hsm_rules(input, report, &mut violations),
         0x7350_49 | 0x5246_4e43 => check_hart_mask_rules(input, report, &mut violations),
         0x504d_55 => check_pmu_rules(input, report, &mut violations),
+        0x5449_4d45 => check_timer_rules(input, report, &mut violations),
+        0x5352_5354 => check_reset_rules(input, report, &mut violations),
+        0x535441 => check_sta_rules(input, report, &mut violations),
+        0x4e41434c => check_nacl_rules(input, report, &mut violations),
         _ => {}
     }
 
@@ -339,6 +343,136 @@ fn check_pmu_rules(
     }
 }
 
+fn check_timer_rules(
+    _input: &HostHarnessInput,
+    report: &HostEcallReport,
+    violations: &mut Vec<SpecViolation>,
+) {
+    if report.sbi_error == SbiError::NotSupported.code() {
+        return;
+    }
+    // Timer set_timer (fid 0) should always succeed for any timer value
+    if report.sbi_error != SbiError::Success.code() {
+        violations.push(SpecViolation::WrongErrorCode {
+            expected: SbiError::Success.code(),
+            got: report.sbi_error,
+            context: "timer set_timer should succeed".to_string(),
+        });
+    }
+}
+
+fn check_reset_rules(
+    input: &HostHarnessInput,
+    report: &HostEcallReport,
+    violations: &mut Vec<SpecViolation>,
+) {
+    if report.sbi_error == SbiError::NotSupported.code() {
+        return;
+    }
+    match input.call.fid {
+        0 => {
+            let reset_type = input.call.args[0];
+            let valid_type = matches!(reset_type, 0 | 1 | 2);
+            let reset_reason = input.call.args[1];
+            let valid_reason = matches!(reset_reason, 0 | 1);
+            if !valid_type || !valid_reason {
+                if report.sbi_error == SbiError::Success.code() {
+                    violations.push(SpecViolation::WrongErrorCode {
+                        expected: SbiError::InvalidParam.code(),
+                        got: report.sbi_error,
+                        context: "system_reset should reject invalid type/reason".to_string(),
+                    });
+                } else if report.sbi_error != SbiError::InvalidParam.code() {
+                    violations.push(SpecViolation::WrongErrorCode {
+                        expected: SbiError::InvalidParam.code(),
+                        got: report.sbi_error,
+                        context: "system_reset wrong error for invalid params".to_string(),
+                    });
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn check_sta_rules(
+    input: &HostHarnessInput,
+    report: &HostEcallReport,
+    violations: &mut Vec<SpecViolation>,
+) {
+    if report.sbi_error == SbiError::NotSupported.code() {
+        return;
+    }
+    match input.call.fid {
+        0 => {
+            // set_shmem: address validation similar to PMU snapshot_set_shmem
+            let addr = join_split_address(input.call.args[0], input.call.args[1]);
+            let len = 8; // typical shmem size for STA
+            let invalid_addr = addr != 0 && !region_covers(&input.memory_regions, addr, len, true, false);
+            if invalid_addr {
+                if report.sbi_error == SbiError::Success.code() {
+                    violations.push(SpecViolation::InvalidAddressNotRejected {
+                        eid: input.call.extid,
+                        fid: input.call.fid,
+                        addr,
+                        len,
+                    });
+                } else if report.sbi_error != SbiError::InvalidParam.code() {
+                    violations.push(SpecViolation::WrongErrorCode {
+                        expected: SbiError::InvalidParam.code(),
+                        got: report.sbi_error,
+                        context: format!(
+                            "sta set_shmem should reject invalid address 0x{:x}",
+                            addr
+                        ),
+                    });
+                }
+            }
+        }
+        1 => {
+            // get_susp_size should succeed
+            if report.sbi_error != SbiError::Success.code() {
+                violations.push(SpecViolation::WrongErrorCode {
+                    expected: SbiError::Success.code(),
+                    got: report.sbi_error,
+                    context: "sta get_susp_size should succeed".to_string(),
+                });
+            }
+        }
+        2 => {
+            // system_suspend: validate suspend_type (same pattern as HSM)
+            let suspend_type = input.call.args[0];
+            let suspend_type_invalid = suspend_type & !0x8000_0000 != 0;
+            if suspend_type_invalid && report.sbi_error != SbiError::InvalidParam.code() {
+                violations.push(SpecViolation::WrongErrorCode {
+                    expected: SbiError::InvalidParam.code(),
+                    got: report.sbi_error,
+                    context: "sta system_suspend with invalid suspend_type".to_string(),
+                });
+            }
+        }
+        _ => {}
+    }
+}
+
+fn check_nacl_rules(
+    _input: &HostHarnessInput,
+    report: &HostEcallReport,
+    violations: &mut Vec<SpecViolation>,
+) {
+    if report.sbi_error == SbiError::NotSupported.code() {
+        return;
+    }
+    // NACL probe_feature (fid 0) should succeed; sync operations should succeed
+    if report.sbi_error != SbiError::Success.code() {
+        violations.push(SpecViolation::WrongErrorCode {
+            expected: SbiError::Success.code(),
+            got: report.sbi_error,
+            context: "nacl operation should succeed".to_string(),
+        });
+    }
+}
+
 fn is_known_extension(extid: u64) -> bool {
     matches!(
         extid,
@@ -351,6 +485,12 @@ fn is_known_extension(extid: u64) -> bool {
             | 0x4442_434e
             | 0x5352_5354
             | 0x504d55
+            | 0x4e41434c
+            | 0x535441
+            | 0x535345
+            | 0x46574654
+            | 0x44425452
+            | 0x4d505859
     )
 }
 

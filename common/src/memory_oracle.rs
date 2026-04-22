@@ -87,8 +87,41 @@ impl MemoryOracle {
 fn allowed_write_regions(input: &HostHarnessInput) -> Vec<usize> {
     match (input.call.extid, input.call.fid) {
         (0x4442_434e, 1) => {
+            // DBCN console read: allow write to the read buffer
             let addr = input.call.args[1];
             let len = input.call.args[0];
+            input
+                .memory_regions
+                .iter()
+                .enumerate()
+                .filter_map(|(index, region)| {
+                    let end = addr.checked_add(len)?;
+                    let region_end = region.guest_addr.checked_add(region.bytes.len() as u64)?;
+                    (addr >= region.guest_addr && end <= region_end).then_some(index)
+                })
+                .collect()
+        }
+        (0x504d_55, 7) => {
+            // PMU snapshot_set_shmem: allow write to the snapshot buffer
+            let addr = ((input.call.args[1] & u64::from(u32::MAX)) << 32)
+                | (input.call.args[0] & u64::from(u32::MAX));
+            let len = 8;
+            input
+                .memory_regions
+                .iter()
+                .enumerate()
+                .filter_map(|(index, region)| {
+                    let end = addr.checked_add(len)?;
+                    let region_end = region.guest_addr.checked_add(region.bytes.len() as u64)?;
+                    (addr >= region.guest_addr && end <= region_end).then_some(index)
+                })
+                .collect()
+        }
+        (0x535441, 0) => {
+            // STA set_shmem: allow write to the shared memory region
+            let addr = ((input.call.args[1] & u64::from(u32::MAX)) << 32)
+                | (input.call.args[0] & u64::from(u32::MAX));
+            let len = 8;
             input
                 .memory_regions
                 .iter()
