@@ -156,6 +156,21 @@ pub enum SequenceStep {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         expect: Option<SequenceFdtExpectation>,
     },
+    Barrier {
+        hart_mask: u64,
+        hart_mask_base: u64,
+    },
+    WaitForHartStateHint {
+        hart_id: u64,
+        state: HostHartState,
+        #[serde(default)]
+        timeout_ms: u64,
+    },
+    ReuseResultAsArg {
+        call_index: u64,
+        target_call_index: u64,
+        target_arg_index: u64,
+    },
 }
 
 impl SequenceProgram {
@@ -434,7 +449,10 @@ pub fn validate_sequence_program(program: &SequenceProgram) -> Result<(), String
             }
             SequenceStep::SetPrivilege { .. }
             | SequenceStep::SetPlatformFault { .. }
-            | SequenceStep::BusyWait { .. } => {}
+            | SequenceStep::BusyWait { .. }
+            | SequenceStep::Barrier { .. }
+            | SequenceStep::WaitForHartStateHint { .. }
+            | SequenceStep::ReuseResultAsArg { .. } => {}
         }
     }
 
@@ -680,7 +698,10 @@ pub fn sequence_program_to_exec(program: &SequenceProgram) -> Result<ExecProgram
             SequenceStep::SetHartState { .. }
             | SequenceStep::SetPrivilege { .. }
             | SequenceStep::SetPlatformFault { .. }
-            | SequenceStep::ParseFdt { .. } => {
+            | SequenceStep::ParseFdt { .. }
+            | SequenceStep::Barrier { .. }
+            | SequenceStep::WaitForHartStateHint { .. }
+            | SequenceStep::ReuseResultAsArg { .. } => {
                 return Err(format!(
                     "step[{index}] is not supported by the firmware exec compiler"
                 ));
@@ -903,6 +924,21 @@ pub fn sequence_program_describe(program: &SequenceProgram) -> String {
                         .unwrap_or_default()
                 ));
             }
+            SequenceStep::Barrier { hart_mask, hart_mask_base } => {
+                lines.push(format!(
+                    "[step:{index}] barrier mask=0x{hart_mask:x} base={hart_mask_base}",
+                ));
+            }
+            SequenceStep::WaitForHartStateHint { hart_id, state, timeout_ms } => {
+                lines.push(format!(
+                    "[step:{index}] wait_for_hart_state hart={hart_id} state={state:?} timeout={timeout_ms}ms",
+                ));
+            }
+            SequenceStep::ReuseResultAsArg { call_index, target_call_index, target_arg_index } => {
+                lines.push(format!(
+                    "[step:{index}] reuse_result src_call={call_index} dst_call={target_call_index} dst_arg={target_arg_index}",
+                ));
+            }
         }
     }
     lines.join("\n")
@@ -929,6 +965,15 @@ pub fn sequence_program_semantic_signature(program: &SequenceProgram) -> String 
                     .join("|")
             ),
             SequenceStep::ParseFdt { object, .. } => format!("fdt:{object}"),
+            SequenceStep::Barrier { hart_mask, hart_mask_base } => {
+                format!("barrier:{hart_mask:x}:{hart_mask_base}")
+            }
+            SequenceStep::WaitForHartStateHint { hart_id, state, .. } => {
+                format!("wait_state:{hart_id}:{state:?}")
+            }
+            SequenceStep::ReuseResultAsArg { call_index, target_call_index, target_arg_index } => {
+                format!("reuse:{call_index}:{target_call_index}:{target_arg_index}")
+            }
         };
         steps.push(token);
     }
