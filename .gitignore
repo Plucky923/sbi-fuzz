@@ -4,3 +4,9 @@ output
 __pycache__
 .humanize/
 .codex
+
+# Fuzz logs and generated reports
+*.log
+logs/
+reports/
+host_harness/fuzz/fuzz-*.log
