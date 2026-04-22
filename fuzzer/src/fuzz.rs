@@ -169,6 +169,106 @@ impl ResizableMutator<u8> for FuzzInput {
     }
 }
 
+/// Adapter that bridges `libafl_bolts::rand::Rand` to `rand::RngCore` (rand 0.8).
+struct LibAflRngAdapter<'a, R: libafl_bolts::rand::Rand>(&'a mut R);
+
+impl<R: libafl_bolts::rand::Rand> rand::RngCore for LibAflRngAdapter<'_, R> {
+    fn next_u32(&mut self) -> u32 {
+        (self.0.next() >> 32) as u32
+    }
+    fn next_u64(&mut self) -> u64 {
+        self.0.next()
+    }
+    fn fill_bytes(&mut self, dest: &mut [u8]) {
+        for chunk in dest.chunks_mut(8) {
+            let val = self.0.next();
+            for (i, byte) in chunk.iter_mut().enumerate() {
+                *byte = (val >> (i * 8)) as u8;
+            }
+        }
+    }
+    fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), rand::Error> {
+        self.fill_bytes(dest);
+        Ok(())
+    }
+}
+
+/// Dispatch mutator that selects structured mutations based on input format
+/// (exec / sequence / raw) and falls back to havoc mutations.
+#[derive(Debug)]
+struct DispatchMutator {
+    havoc: StdScheduledMutator<libafl::mutators::havoc_mutations::HavocMutationsType>,
+}
+
+impl DispatchMutator {
+    fn new() -> Self {
+        Self {
+            havoc: StdScheduledMutator::new(libafl::mutators::havoc_mutations::havoc_mutations()),
+        }
+    }
+}
+
+impl<S> libafl::mutators::Mutator<FuzzInput, S> for DispatchMutator
+where
+    S: libafl::state::HasRand,
+{
+    fn mutate(
+        &mut self,
+        state: &mut S,
+        input: &mut FuzzInput,
+    ) -> Result<libafl::mutators::MutationResult, libafl::Error> {
+        let rng = state.rand_mut();
+        let mut adapter = LibAflRngAdapter(rng);
+
+        // With ~15% probability, escape to pure havoc to avoid local optima.
+        if adapter.gen_range(0..100) < 15 {
+            return self.havoc.mutate(state, input);
+        }
+
+        let bytes = &input.0;
+        let mutated = if bytes.starts_with(EXEC_MAGIC) {
+            if let Ok(mut program) = exec_program_from_bytes(bytes) {
+                if mutate_exec_program(&mut program, &mut adapter) {
+                    input.0 = exec_program_to_bytes(&program);
+                    true
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        } else if bytes.starts_with(SEQUENCE_MAGIC) {
+            if let Ok(mut program) = sequence_program_from_bytes(bytes) {
+                if mutate_sequence_program(&mut program, &mut adapter).is_some() {
+                    input.0 = sequence_program_to_bytes(&program);
+                    true
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+
+        if mutated {
+            Ok(libafl::mutators::MutationResult::Mutated)
+        } else {
+            // Fallback to havoc for unrecognized or unmutatable inputs.
+            self.havoc.mutate(state, input)
+        }
+    }
+}
+
+impl libafl_bolts::Named for DispatchMutator {
+    fn name(&self) -> &std::borrow::Cow<'static, str> {
+        static NAME: std::borrow::Cow<'static, str> =
+            std::borrow::Cow::Borrowed("DispatchMutator");
+        &NAME
+    }
+}
+
 #[derive(Clone, Debug)]
 struct FuzzInputGenerator(RandBytesGenerator);
 
@@ -641,7 +741,7 @@ pub fn fuzz(
         }
 
         // Set up mutation strategy and start the fuzzing loop
-        let mutator = StdScheduledMutator::new(havoc_mutations());
+        let mutator = DispatchMutator::new();
         let mut stages = tuple_list!(StdMutationalStage::new(mutator));
         let monitor_timeout = Duration::from_secs(1);
         let fuzz_result = loop {

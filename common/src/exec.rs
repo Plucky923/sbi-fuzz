@@ -1,4 +1,5 @@
 use crate::{Args, InputData, Metadata, fix_input_args, get_call_schema};
+use rand::Rng;
 
 pub const EXEC_BUFFER_SIZE: usize = 4 << 10;
 pub const EXEC_MAGIC: &[u8; 8] = b"SBIEXEC1";
@@ -940,6 +941,130 @@ fn validate_exec_addr(addr: u64, context: String) -> Result<(), String> {
         return Err(format!("{context} out of exec buffer range: 0x{addr:x}"));
     }
     Ok(())
+}
+
+pub fn mutate_exec_program<R: Rng>(program: &mut ExecProgram, rng: &mut R) -> bool {
+    if program.instructions.is_empty() {
+        return false;
+    }
+
+    let call_indices: Vec<usize> = program
+        .instructions
+        .iter()
+        .enumerate()
+        .filter_map(|(i, instr)| matches!(instr, ExecInstr::Call { .. }).then_some(i))
+        .collect();
+
+    match rng.gen_range(0..6) {
+        0 if !call_indices.is_empty() => {
+            let idx = call_indices[rng.gen_range(0..call_indices.len())];
+            let new_call_id = rng.gen_range(0..EXEC_CALL_TABLE.len() as u64);
+            if let ExecInstr::Call { ref mut call_id, .. } = program.instructions[idx] {
+                *call_id = new_call_id;
+                true
+            } else {
+                false
+            }
+        }
+        1 if !call_indices.is_empty() => {
+            let idx = call_indices[rng.gen_range(0..call_indices.len())];
+            if let ExecInstr::Call { ref mut args, .. } = program.instructions[idx] {
+                if args.is_empty() {
+                    false
+                } else {
+                    let arg_idx = rng.gen_range(0..args.len());
+                    args[arg_idx] = mutate_exec_arg(&args[arg_idx], rng);
+                    true
+                }
+            } else {
+                false
+            }
+        }
+        2 => {
+            let idx = rng.gen_range(0..=program.instructions.len());
+            let kind = rng.gen_range(0..2);
+            let value = if kind == 0 {
+                exec_prop_target_hart(rng.gen_range(0..8))
+            } else {
+                exec_prop_busy_wait(rng.gen_range(0..(1 << 20)))
+            };
+            program.instructions.insert(idx, ExecInstr::SetProps { value });
+            true
+        }
+        3 if program.instructions.len() > 1 => {
+            let removable: Vec<usize> = program
+                .instructions
+                .iter()
+                .enumerate()
+                .filter_map(|(i, instr)| matches!(instr, ExecInstr::SetProps { .. } | ExecInstr::CopyIn { .. }).then_some(i))
+                .collect();
+            if removable.is_empty() {
+                false
+            } else {
+                program.instructions.remove(removable[rng.gen_range(0..removable.len())]);
+                true
+            }
+        }
+        4 if !call_indices.is_empty() => {
+            let idx = call_indices[rng.gen_range(0..call_indices.len())];
+            let duplicate = program.instructions[idx].clone();
+            program.instructions.insert(idx + 1, duplicate);
+            true
+        }
+        5 if program.instructions.len() > 1 => {
+            let left = rng.gen_range(0..program.instructions.len());
+            let mut right = rng.gen_range(0..program.instructions.len());
+            if left == right {
+                right = (right + 1) % program.instructions.len();
+            }
+            program.instructions.swap(left, right);
+            true
+        }
+        _ => false,
+    }
+}
+
+fn mutate_exec_arg<R: Rng>(arg: &ExecArg, rng: &mut R) -> ExecArg {
+    match arg {
+        ExecArg::Const { size, value } => {
+            let new_value = if rng.gen_bool(0.5) {
+                value ^ (1_u64 << rng.gen_range(0..64))
+            } else {
+                value.wrapping_add(rng.gen_range(1..=16))
+            };
+            ExecArg::Const { size: *size, value: new_value }
+        }
+        ExecArg::Addr32 { offset } => {
+            let new_offset = offset.wrapping_add(rng.gen_range(0..64));
+            ExecArg::Addr32 { offset: new_offset % EXEC_BUFFER_SIZE as u64 }
+        }
+        ExecArg::Addr64 { offset } => {
+            let new_offset = offset.wrapping_add(rng.gen_range(0..64));
+            ExecArg::Addr64 { offset: new_offset % EXEC_BUFFER_SIZE as u64 }
+        }
+        ExecArg::Result { size, index, op_div, op_add, default } => {
+            let new_default = if rng.gen_bool(0.5) {
+                default ^ (1_u64 << rng.gen_range(0..64))
+            } else {
+                default.wrapping_add(rng.gen_range(1..=16))
+            };
+            ExecArg::Result {
+                size: *size,
+                index: *index,
+                op_div: *op_div,
+                op_add: *op_add,
+                default: new_default,
+            }
+        }
+        ExecArg::Data(bytes) => {
+            let mut new_bytes = bytes.clone();
+            if !new_bytes.is_empty() {
+                let idx = rng.gen_range(0..new_bytes.len());
+                new_bytes[idx] = new_bytes[idx].wrapping_add(rng.gen_range(1..=16));
+            }
+            ExecArg::Data(new_bytes)
+        }
+    }
 }
 
 fn write_varint(value: u64, buf: &mut Vec<u8>) {

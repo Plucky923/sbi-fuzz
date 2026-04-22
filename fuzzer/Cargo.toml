@@ -14,6 +14,7 @@ libafl_qemu = { version = "0.15.1", features = [
     "systemmode",
 ], default-features = false }
 libafl_targets = "0.15.1"
+rand = "0.8"
 rangemap = "1.5.1"
 serde = "1.0.218"
 toml = "0.8.20"
