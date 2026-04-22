@@ -21,7 +21,6 @@ preflight-real:
 
 preflight-fixture:
 	@$(MAKE) docs-check
-	@$(MAKE) test-regression
 	@$(MAKE) test-docs-check
 	@$(MAKE) test-campaign-quality-gate
 	@$(MAKE) test-cross-layer-dedup

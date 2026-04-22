@@ -136,7 +136,7 @@ fn prepare_seeds(dir: &PathBuf) -> Result<PathBuf, String> {
             .unwrap_or("unknown");
         let output_file_path = binary_seed_dir.join(file_name);
 
-        match ext.expect("seed extension") {
+        match ext.unwrap_or("") {
             "toml" => {
                 let toml_content =
                     fs::read_to_string(entry_path).map_err(|e| format!("read toml file: {e}"))?;
@@ -174,11 +174,11 @@ fn prepare_seeds(dir: &PathBuf) -> Result<PathBuf, String> {
                     );
                     continue;
                 };
-                let mut output_file =
-                    File::create(&output_file_path).expect("create binary seed file");
+                let mut output_file = File::create(&output_file_path)
+                    .map_err(|e| format!("create binary seed file: {e}"))?;
                 output_file
                     .write_all(&exec_program_to_bytes(&exec_program))
-                    .expect("write binary seed file");
+                    .map_err(|e| format!("write binary seed file: {e}"))?;
             }
             _ => continue,
         }

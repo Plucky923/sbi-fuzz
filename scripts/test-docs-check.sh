@@ -40,8 +40,8 @@ if [[ $rc -eq 0 ]]; then
     exit 1
 fi
 
-rg -n 'missing local doc reference `missing-plan.md`' "$stderr_path" >/dev/null
-rg -n 'unknown target `not-a-real-target`' "$stderr_path" >/dev/null
+grep -n 'missing local doc reference.*missing-plan.md' "$stderr_path" >/dev/null
+grep -n 'unknown target.*not-a-real-target' "$stderr_path" >/dev/null
 rm -f "$stderr_path"
 
 echo "docs check test passed"
