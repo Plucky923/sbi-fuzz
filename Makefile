@@ -87,6 +87,16 @@ test-coverage-baseline:
 	@bash ./tests/fixtures/baseline/run-missing-dir-test.sh
 	@bash ./tests/fixtures/baseline/run-positive-baseline-test.sh
 
+archive-host-findings:
+	@python3 ./scripts/archive-host-fuzz-findings.py \
+	    ./output/host_fuzz/triage.json \
+	    --output-dir ./output/host_fuzz/archive
+
+reback-host-corpus:
+	@python3 ./scripts/reback-host-corpus.py \
+	    ./output/host_fuzz/archive \
+	    --output-dir ./output/seed-reback
+
 test-campaign-summary-delta:
 	@bash ./scripts/test-campaign-summary-delta.sh
 
