@@ -132,7 +132,7 @@ def validate_coverage_baseline(data: dict) -> None:
         if missing:
             fail(f"coverage baseline entry `{key}`: missing keys {missing}")
         for field in required_entry_keys:
-            if field in entry and not isinstance(entry[field], int):
+            if field in entry and type(entry[field]) is not int:
                 fail(f"coverage baseline entry `{key}`: {field} must be an integer")
 
 

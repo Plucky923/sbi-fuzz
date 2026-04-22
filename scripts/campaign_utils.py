@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
+from __future__ import annotations
+
 import json
 import sys
 import hashlib
 import subprocess
 import time
-import tomllib
+try:
+    import tomllib
+except ModuleNotFoundError:
+    import tomli as tomllib
 from pathlib import Path
 
 

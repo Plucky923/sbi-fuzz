@@ -1,11 +1,11 @@
 use common::{
-    HostCall, HostHarnessInput, HostHarnessMode, HostHartState, HostMemoryRegion,
-    HostPlatformFaultProfile, HostPrivilegeState, HostTargetKind,
-    DiffPolicy, HsmOp, HsmStateTracker, MemoryOracle, SequenceArg, SequenceFdtExpectation,
-    SequenceMemoryObject, SequenceProgram, SequenceStep, check_host_report, generate_seed_variants,
-    sequence_memory_guest_addr, sequence_program_describe, sequence_program_from_bytes,
-    sequence_program_from_exec, sequence_program_from_semantic_input,
-    sequence_program_from_toml_input, sequence_program_semantic_signature, sequence_program_to_bytes,
+    check_host_report, generate_seed_variants, sequence_memory_guest_addr,
+    sequence_program_describe, sequence_program_from_bytes, sequence_program_from_exec,
+    sequence_program_from_semantic_input, sequence_program_from_toml_input,
+    sequence_program_semantic_signature, sequence_program_to_bytes, DiffPolicy, HostCall,
+    HostHarnessInput, HostHarnessMode, HostHartState, HostMemoryRegion, HostPlatformFaultProfile,
+    HostPrivilegeState, HostTargetKind, HsmOp, HsmStateTracker, MemoryOracle, SequenceArg,
+    SequenceFdtExpectation, SequenceMemoryObject, SequenceProgram, SequenceStep,
 };
 use host_harness::{self, FdtSeedVariant, HostHarnessReport, HostHarnessResult};
 use serde::Serialize;
@@ -203,7 +203,9 @@ pub fn import_exec_as_sequence(input: PathBuf, output: Option<PathBuf>) -> Resul
         sequence_program_from_exec(&common::exec_program_from_bytes(&raw)?)?
     } else if input.extension().and_then(|ext| ext.to_str()) == Some("toml") {
         let text = String::from_utf8(raw).map_err(|err| err.to_string())?;
-        let input = common::fix_input_args(common::input_from_toml(&text));
+        let input = common::fix_input_args(
+            common::try_input_from_toml(&text).map_err(|e| format!("toml parse: {e}"))?,
+        );
         sequence_program_from_toml_input(&input)
     } else {
         return Err(format!(
@@ -270,7 +272,8 @@ pub fn minimize_spec_violation(
             if common::validate_sequence_program(&candidate).is_err() {
                 continue;
             }
-            let Some(candidate_violation) = detect_sequence_violation(&candidate, impl_kind)? else {
+            let Some(candidate_violation) = detect_sequence_violation(&candidate, impl_kind)?
+            else {
                 continue;
             };
             if candidate_violation.signature == baseline_signature {
@@ -286,13 +289,16 @@ pub fn minimize_spec_violation(
     } else {
         serde_json::to_vec_pretty(&program).map_err(|err| err.to_string())?
     };
-    fs::write(&output, if output.extension().and_then(|ext| ext.to_str()) == Some("seq") {
-        encoded
-    } else {
-        let mut with_newline = encoded;
-        with_newline.push(b'\n');
-        with_newline
-    })
+    fs::write(
+        &output,
+        if output.extension().and_then(|ext| ext.to_str()) == Some("seq") {
+            encoded
+        } else {
+            let mut with_newline = encoded;
+            with_newline.push(b'\n');
+            with_newline
+        },
+    )
     .map_err(|err| err.to_string())?;
 
     let report = SequenceMinimizeReport {
@@ -514,7 +520,10 @@ fn detect_sequence_violation(
                 state.active_hart = *hart_id;
                 hsm_tracker.select_hart(*hart_id);
             }
-            SequenceStep::SetHartState { hart_id, state: hart_state } => {
+            SequenceStep::SetHartState {
+                hart_id,
+                state: hart_state,
+            } => {
                 state.hart_states.insert(*hart_id, *hart_state);
                 hsm_tracker.set_hart_state(*hart_id, *hart_state);
             }
@@ -1012,18 +1021,19 @@ fn diff_sequence_reports(
                 continue;
             }
             compared_steps += 1;
-            let ignore_value_diff =
-                left.value != right.value && should_ignore_sequence_value_diff(&policy, left, right);
+            let ignore_value_diff = left.value != right.value
+                && should_ignore_sequence_value_diff(&policy, left, right);
             let same = left.sbi_error == right.sbi_error
                 && left.value == right.value
                 && left.extension_found == right.extension_found
                 && left.fdt_status == right.fdt_status
                 && left.fdt_hart_count == right.fdt_hart_count;
-            let same = same || (ignore_value_diff
-                && left.sbi_error == right.sbi_error
-                && left.extension_found == right.extension_found
-                && left.fdt_status == right.fdt_status
-                && left.fdt_hart_count == right.fdt_hart_count);
+            let same = same
+                || (ignore_value_diff
+                    && left.sbi_error == right.sbi_error
+                    && left.extension_found == right.extension_found
+                    && left.fdt_status == right.fdt_status
+                    && left.fdt_hart_count == right.fdt_hart_count);
             if !same {
                 mismatches.push(SequenceMismatch {
                     index: left.index,
@@ -1433,8 +1443,8 @@ mod tests {
     use super::*;
     use common::{
         HostCall, HostEcallReport, HostHarnessMode, HostHartState, HostMemoryRegion,
-        HostPlatformFaultMode, HostPlatformFaultProfile, HostPrivilegeState, SequenceArg, SequenceEnv,
-        SequenceMemoryObject, SequenceMetadata, SequenceProgram, SequenceStep,
+        HostPlatformFaultMode, HostPlatformFaultProfile, HostPrivilegeState, SequenceArg,
+        SequenceEnv, SequenceMemoryObject, SequenceMetadata, SequenceProgram, SequenceStep,
     };
 
     #[test]
@@ -1614,9 +1624,8 @@ mod tests {
             ],
         };
 
-        let report =
-            run_sequence_program(&program, HostTargetKind::OpenSbi, "mem".to_string())
-                .expect("run sequence with duplicate side effects");
+        let report = run_sequence_program(&program, HostTargetKind::OpenSbi, "mem".to_string())
+            .expect("run sequence with duplicate side effects");
         assert_eq!(report.classification, "ok");
         assert_eq!(report.steps.len(), 2);
         assert_eq!(report.steps[1].classification, "ok");

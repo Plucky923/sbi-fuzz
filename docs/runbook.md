@@ -110,7 +110,8 @@ python3 scripts/validate-report-artifacts.py baseline.json --kind coverage-basel
 Success criteria:
 
 - `baseline.json` passes schema validation
-- No input files are skipped silently (the tool exits non-zero on parse/classification failures)
+- Files with recognized extensions (`.toml`, `.exec`, `.seq`) are processed; unrecognized files are ignored during scanning
+- Parse or classification failures for recognized seeds cause a non-zero exit
 - No coverage parse errors or fallback QEMU edges are accepted
 
 Escalation:

@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
+from __future__ import annotations
+
 import argparse
 import hashlib
 import json
 import os
 import re
 import subprocess
-import tomllib
+try:
+    import tomllib
+except ModuleNotFoundError:
+    import tomli as tomllib
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from pathlib import Path

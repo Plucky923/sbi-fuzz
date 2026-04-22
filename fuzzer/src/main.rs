@@ -106,22 +106,24 @@ const TEMP_SEED_DIR_PREFIX: &str = "/tmp/sbifuzz_seed";
 ///
 /// This function reads TOML files from the input directory, converts them
 /// to binary format, and writes them to a temporary directory for the fuzzer
-fn prepare_seeds(dir: &PathBuf) -> PathBuf {
+fn prepare_seeds(dir: &PathBuf) -> Result<PathBuf, String> {
     let binary_seed_dir = PathBuf::from(format!("{}_{}", TEMP_SEED_DIR_PREFIX, process::id()));
     let binary_seed_dir = binary_seed_dir.as_path();
     // Clean up any existing temporary directory
     if binary_seed_dir.exists() {
         if binary_seed_dir.is_dir() {
-            fs::remove_dir_all(binary_seed_dir).expect("remove temporary seed directory");
+            fs::remove_dir_all(binary_seed_dir)
+                .map_err(|e| format!("remove temporary seed directory: {e}"))?;
         } else {
-            fs::remove_file(binary_seed_dir).expect("remove temporary seed file");
+            fs::remove_file(binary_seed_dir)
+                .map_err(|e| format!("remove temporary seed file: {e}"))?;
         }
     }
-    fs::create_dir(binary_seed_dir).expect("create temporary seed directory");
+    fs::create_dir(binary_seed_dir).map_err(|e| format!("create temporary seed directory: {e}"))?;
 
-    // Process each TOML file in the input directory
+    // Process each seed file in the input directory
     for entry in WalkDir::new(dir) {
-        let entry = entry.unwrap();
+        let entry = entry.map_err(|e| format!("walk directory: {e}"))?;
         let entry_path = entry.path();
         let ext = entry_path.extension().and_then(|value| value.to_str());
         if !entry_path.is_file() || ext.is_none() {
@@ -136,27 +138,35 @@ fn prepare_seeds(dir: &PathBuf) -> PathBuf {
 
         match ext.expect("seed extension") {
             "toml" => {
-                let toml_content = fs::read_to_string(entry_path).expect("read toml file");
-                let toml_data = fix_input_args(input_from_toml(&toml_content));
+                let toml_content =
+                    fs::read_to_string(entry_path).map_err(|e| format!("read toml file: {e}"))?;
+                let toml_data = fix_input_args(
+                    try_input_from_toml(&toml_content)
+                        .map_err(|e| format!("parse toml seed file: {e}"))?,
+                );
                 let exec_program = normalize_exec_program(exec_program_from_input(&toml_data));
-                let mut output_file =
-                    File::create(&output_file_path).expect("create binary seed file");
+                let mut output_file = File::create(&output_file_path)
+                    .map_err(|e| format!("create binary seed file: {e}"))?;
                 output_file
                     .write_all(&exec_program_to_bytes(&exec_program))
-                    .expect("write binary seed file");
+                    .map_err(|e| format!("write binary seed file: {e}"))?;
             }
             "exec" => {
-                let exec_bytes = fs::read(entry_path).expect("read exec seed file");
-                exec_program_from_bytes(&exec_bytes).expect("validate exec seed file");
-                let mut output_file =
-                    File::create(&output_file_path).expect("create binary seed file");
+                let exec_bytes =
+                    fs::read(entry_path).map_err(|e| format!("read exec seed file: {e}"))?;
+                exec_program_from_bytes(&exec_bytes)
+                    .map_err(|e| format!("validate exec seed file: {e}"))?;
+                let mut output_file = File::create(&output_file_path)
+                    .map_err(|e| format!("create binary seed file: {e}"))?;
                 output_file
                     .write_all(&exec_bytes)
-                    .expect("write binary seed file");
+                    .map_err(|e| format!("write binary seed file: {e}"))?;
             }
             "seq" => {
-                let raw = fs::read(entry_path).expect("read sequence seed file");
-                let sequence = sequence_program_from_bytes(&raw).expect("parse sequence seed file");
+                let raw =
+                    fs::read(entry_path).map_err(|e| format!("read sequence seed file: {e}"))?;
+                let sequence = sequence_program_from_bytes(&raw)
+                    .map_err(|e| format!("parse sequence seed file: {e}"))?;
                 let Ok(exec_program) = sequence_program_to_exec(&sequence) else {
                     eprintln!(
                         "Skipping host-only sequence seed {} because it cannot be lowered to firmware exec",
@@ -174,7 +184,7 @@ fn prepare_seeds(dir: &PathBuf) -> PathBuf {
         }
     }
 
-    binary_seed_dir.to_path_buf()
+    Ok(binary_seed_dir.to_path_buf())
 }
 
 /// Generate a function that determines whether to skip a particular input
@@ -225,7 +235,13 @@ fn main() {
     // Convert seed files from TOML to binary format
     let mut seed_dir = None;
     if args.seed.is_some() {
-        seed_dir = Some(prepare_seeds(&args.seed.clone().unwrap()));
+        seed_dir = match prepare_seeds(&args.seed.clone().unwrap()) {
+            Ok(dir) => Some(dir),
+            Err(err) => {
+                eprintln!("Seed preparation failed: {err}");
+                process::exit(2);
+            }
+        };
     }
 
     // Start the fuzzing process

@@ -36,4 +36,13 @@ else
     exit 1
 fi
 
+# Test 4: boolean stat field should fail (bool is subclass of int in Python)
+echo -n "Test 4 (boolean unique_pcs): "
+if ! python3 "$VALIDATOR" "$SCRIPT_DIR/invalid-bool-pcs.json" --kind coverage-baseline >/dev/null 2>&1; then
+    echo "PASS"
+else
+    echo "FAIL"
+    exit 1
+fi
+
 echo "=== All fixture tests passed ==="

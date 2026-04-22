@@ -41,7 +41,7 @@ def validate(path: str) -> int:
             if missing:
                 errors.append(f"entries[{key!r}] missing fields: {sorted(missing)}")
             for field in required_fields:
-                if field in entry and not isinstance(entry[field], int):
+                if field in entry and type(entry[field]) is not int:
                     errors.append(f"entries[{key!r}].{field} must be an integer")
 
     if errors:

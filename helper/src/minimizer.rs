@@ -1,9 +1,9 @@
 use common::{
-    EXEC_MAGIC, EXEC_NO_COPYOUT, EXEC_PROP_BUSY_WAIT, EXEC_PROP_TARGET_HART, ExecArg, ExecCallKind,
-    ExecInstr, ExecProgram, decode_exec_prop, exec_call_desc, exec_call_id_for,
-    exec_program_from_bytes, exec_program_from_input, exec_program_to_bytes, fix_input_args,
-    format_exec_prop, get_extension_name, input_from_binary, input_from_toml,
-    validate_exec_program,
+    decode_exec_prop, exec_call_desc, exec_call_id_for, exec_program_from_bytes,
+    exec_program_from_input, exec_program_to_bytes, fix_input_args, format_exec_prop,
+    get_extension_name, input_from_binary, try_input_from_toml, validate_exec_program, ExecArg,
+    ExecCallKind, ExecInstr, ExecProgram, EXEC_MAGIC, EXEC_NO_COPYOUT, EXEC_PROP_BUSY_WAIT,
+    EXEC_PROP_TARGET_HART,
 };
 use serde::Serialize;
 use std::{
@@ -173,7 +173,8 @@ pub fn minimize_hang(
 fn load_exec_program(path: &Path) -> Result<ExecProgram, String> {
     if path.extension().and_then(|ext| ext.to_str()) == Some("toml") {
         let input = fs::read_to_string(path).map_err(|err| err.to_string())?;
-        let data = fix_input_args(input_from_toml(&input));
+        let data =
+            fix_input_args(try_input_from_toml(&input).map_err(|e| format!("toml parse: {e}"))?);
         return Ok(exec_program_from_input(&data));
     }
 
@@ -489,7 +490,7 @@ fn remove_instruction_range(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use common::{EXEC_NO_COPYOUT, ExecArg, ExecInstr, exec_prop_busy_wait, exec_prop_target_hart};
+    use common::{exec_prop_busy_wait, exec_prop_target_hart, ExecArg, ExecInstr, EXEC_NO_COPYOUT};
 
     fn const_arg(value: u64) -> ExecArg {
         ExecArg::Const { size: 8, value }
@@ -561,20 +562,16 @@ mod tests {
         let result = minimize_exec_program(program, &mut predicate);
         assert_eq!(result.program.instructions.len(), 2);
         assert_eq!(result.program.call_count(), 1);
-        assert!(
-            result
-                .program
-                .instructions
-                .iter()
-                .any(|instr| matches!(instr, ExecInstr::SetProps { .. }))
-        );
-        assert!(
-            result
-                .program
-                .instructions
-                .iter()
-                .any(|instr| matches!(instr, ExecInstr::Call { .. }))
-        );
+        assert!(result
+            .program
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, ExecInstr::SetProps { .. })));
+        assert!(result
+            .program
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, ExecInstr::Call { .. })));
         assert!(result.stats.tested_candidates > 0);
         assert!(result.stats.accepted_candidates > 0);
     }
@@ -610,11 +607,9 @@ mod tests {
         assert_eq!(profile.harts, vec![0, 2]);
         assert!(profile.signature.contains("hart=2"));
         assert!(profile.signature.contains("busy_wait=512"));
-        assert!(
-            profile
-                .signature
-                .contains("hart2:raw->base_get_impl_version@wait512")
-        );
+        assert!(profile
+            .signature
+            .contains("hart2:raw->base_get_impl_version@wait512"));
         assert_eq!(
             profile.calls,
             vec!["hart2:raw->base_get_impl_version@wait512"]

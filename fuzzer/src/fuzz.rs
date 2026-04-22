@@ -3,9 +3,8 @@ use common::*;
 use core::time::Duration;
 use csv::Writer;
 use libafl::{
-    Error, HasNamedMetadata,
     corpus::{Corpus, CorpusId, InMemoryOnDiskCorpus, OnDiskCorpus, Testcase},
-    events::{EventConfig, launcher::Launcher, std_maybe_report_progress, std_report_progress},
+    events::{launcher::Launcher, std_maybe_report_progress, std_report_progress, EventConfig},
     executors::ExitKind,
     feedback_or,
     feedbacks::{CrashFeedback, MaxMapFeedback, TimeFeedback},
@@ -19,21 +18,22 @@ use libafl::{
     schedulers::{IndexesLenTimeMinimizerScheduler, QueueScheduler},
     stages::StdMutationalStage,
     state::{HasCorpus, HasExecutions, StdState},
+    Error, HasNamedMetadata,
 };
 use libafl_bolts::{
-    AsSlice, ClientId,
     core_affinity::Cores,
     current_nanos, current_time, generic_hash_std, impl_serdeany,
     ownedref::OwnedMutSlice,
     rands::StdRand,
     shmem::{ShMemProvider, StdShMemProvider},
     tuples::tuple_list,
+    AsSlice, ClientId,
 };
 use libafl_qemu::{
-    Emulator, QemuExitError, QemuExitReason, QemuShutdownCause, Regs, elf::EasyElf,
-    executor::QemuExecutor, modules::edges::StdEdgeCoverageModuleBuilder,
+    elf::EasyElf, executor::QemuExecutor, modules::edges::StdEdgeCoverageModuleBuilder, Emulator,
+    QemuExitError, QemuExitReason, QemuShutdownCause, Regs,
 };
-use libafl_targets::{EDGES_MAP_DEFAULT_SIZE, MAX_EDGES_FOUND, edges_map_mut_ptr};
+use libafl_targets::{edges_map_mut_ptr, EDGES_MAP_DEFAULT_SIZE, MAX_EDGES_FOUND};
 use serde::{Deserialize, Serialize};
 use std::{
     cmp::max,
@@ -282,12 +282,10 @@ pub fn fuzz(
         };
 
         // Set up coverage modules
-        let emulator_modules = tuple_list!(
-            StdEdgeCoverageModuleBuilder::default()
-                .map_observer(edges_observer.as_mut())
-                .build()
-                .expect("build std edge coverage module")
-        );
+        let emulator_modules = tuple_list!(StdEdgeCoverageModuleBuilder::default()
+            .map_observer(edges_observer.as_mut())
+            .build()
+            .expect("build std edge coverage module"));
 
         // Initialize the QEMU emulator and set breakpoints
         if debug_startup {

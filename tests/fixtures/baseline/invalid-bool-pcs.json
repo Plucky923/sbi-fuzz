@@ -1,0 +1,13 @@
+{
+  "schema_version": "1.0.0",
+  "target": "fw_dynamic.bin",
+  "injector": "injector.elf",
+  "entries": {
+    "0x00000010/0x0": {
+      "unique_pcs": true,
+      "total_pcs": 10,
+      "semantic_signature_count": 1,
+      "timeout_count": 0
+    }
+  }
+}
