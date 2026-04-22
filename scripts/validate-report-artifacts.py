@@ -118,12 +118,27 @@ def validate_cross_layer(data: dict) -> None:
             fail(f"cross-layer bug `{key}`: reproducers must be a list")
 
 
+def validate_coverage_baseline(data: dict) -> None:
+    require_keys(data, {"schema_version", "target", "injector", "entries"}, "coverage baseline")
+    if data["schema_version"] != "1.0.0":
+        fail("coverage baseline: schema_version must be '1.0.0'")
+    if not isinstance(data["entries"], dict):
+        fail("coverage baseline: entries must be an object")
+    required_entry_keys = {"unique_pcs", "total_pcs", "semantic_signature_count", "timeout_count"}
+    for key, entry in data["entries"].items():
+        if not isinstance(entry, dict):
+            fail(f"coverage baseline entry `{key}`: must be an object")
+        missing = sorted(required_entry_keys - set(entry.keys()))
+        if missing:
+            fail(f"coverage baseline entry `{key}`: missing keys {missing}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Validate generated report artifacts")
     parser.add_argument("input", type=Path)
     parser.add_argument(
         "--kind",
-        choices=["bug-report", "cross-layer", "host-triage", "quality-gate"],
+        choices=["bug-report", "cross-layer", "host-triage", "quality-gate", "coverage-baseline"],
         required=True,
     )
     args = parser.parse_args()
@@ -134,6 +149,7 @@ def main() -> int:
         "cross-layer": validate_cross_layer,
         "host-triage": validate_host_triage,
         "quality-gate": validate_quality_gate,
+        "coverage-baseline": validate_coverage_baseline,
     }
     try:
         validators[args.kind](data)

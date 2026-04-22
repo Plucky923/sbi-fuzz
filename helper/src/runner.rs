@@ -611,7 +611,10 @@ fn classify_startup_exit(result: Result<QemuExitReason, QemuExitError>) -> Start
 fn load_wire_input(input: &PathBuf) -> Result<Vec<u8>, String> {
     if input.extension().and_then(|ext| ext.to_str()) == Some("toml") {
         let toml_content = fs::read_to_string(input).map_err(|err| err.to_string())?;
-        let input = fix_input_args(input_from_toml(&toml_content));
+        let input = fix_input_args(
+            try_input_from_toml(&toml_content)
+                .map_err(|err| format!("parse toml {}: {err}", input.display()))?
+        );
         let program = normalize_exec_program(exec_program_from_input(&input));
         return Ok(exec_program_to_bytes(&program));
     }

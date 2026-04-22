@@ -77,6 +77,48 @@ SBIFUZZ_USE_FIXTURES=1 make report-all
 
 Use this when the full host fuzz and OpenSBI toolchain is unavailable but you still need to verify the documented orchestration and artifact contract end to end.
 
+## S0.5: Coverage Baseline Measurement
+
+Use S0.5 to establish a per-extension/function coverage baseline before running longer campaigns.
+
+```bash
+# Build the helper with QEMU feature (requires clang/clang++ and OpenSBI source tree)
+cargo build -p helper --features qemu --release
+
+# Run baseline over seed directories
+./target/release/helper coverage-baseline \
+    fw_dynamic.bin \
+    injector.elf \
+    output/seed output/seed-complex \
+    --output baseline.json \
+    --timeout-ms 30000
+```
+
+Expected outputs:
+
+- `baseline.json` containing `schema_version: "1.0.0"` and per `eid/fid` statistics:
+  - `unique_pcs`, `total_pcs`, `semantic_signature_count`, `timeout_count`
+
+Validation:
+
+```bash
+python3 scripts/validate-coverage-baseline.py baseline.json
+# or via the unified validator:
+python3 scripts/validate-report-artifacts.py baseline.json --kind coverage-baseline
+```
+
+Success criteria:
+
+- `baseline.json` passes schema validation
+- No input files are skipped silently (the tool exits non-zero on parse/classification failures)
+- No coverage parse errors or fallback QEMU edges are accepted
+
+Escalation:
+
+- If `coverage-baseline` exits with "target firmware does not exist", verify `fw_dynamic.bin` and `injector.elf` are built.
+- If `coverage-baseline` exits with "coverage parse error", check the injector/shared-buffer compatibility.
+- If `coverage-baseline` exits with "fallback QEMU edges", verify the injector ELF exports `SBI_COVERAGE_BUFFER`.
+
 ## S1: Single-Implementation Host Fuzzing
 
 Use S1 for fast RustSBI-oriented discovery after S0 is green.

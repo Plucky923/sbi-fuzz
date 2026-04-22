@@ -245,9 +245,13 @@ pub fn collect_coverage_baseline(args: CoverageBaseline) {
 
         let is_timeout = report.exit_kind == "Timeout";
 
-        // Hard-fail on coverage parse errors
+        // Hard-fail on coverage parse errors or fallback coverage
         if let Some(ref err) = report.coverage_parse_error {
             eprintln!("coverage-baseline: coverage parse error for {}: {}", input_path.display(), err);
+            std::process::exit(1);
+        }
+        if report.fallback_to_qemu_edges {
+            eprintln!("coverage-baseline: fallback QEMU edges for {} (shared buffer unavailable)", input_path.display());
             std::process::exit(1);
         }
         if report.coverage.is_none() && !is_timeout {
